@@ -214,6 +214,15 @@ req = _u2.Request(BASE + final["url"] + "?download=1")
 with _u2.urlopen(req) as r: disp = r.headers.get("Content-Disposition","")
 check("export sets download header", "attachment" in disp, disp)
 
+print("== cost dashboard (estimated vs actual ledger) ==")
+c, cd = call("GET", f"/api/projects/{pid}/costs"); check("cost dashboard 200", c==200, c)
+check("estimated total > 0", cd["estimated"]["total"] > 0, cd["estimated"]["total"])
+check("actual ledger total > 0", cd["actual"]["total"] > 0, cd["actual"]["total"])
+check("ledger has keyframes+video+audio+render steps",
+      all(k in cd["actual"]["by_step"] for k in ("keyframes","video","audio")), cd["actual"]["by_step"])
+check("by_step sums to actual total", abs(sum(cd["actual"]["by_step"].values()) - cd["actual"]["total"]) < 1e-6)
+check("entries flagged mock", cd["mock"] is True and cd["actual"]["entries"][0]["mock"] is True)
+
 print("== jobs listing ==")
 c, jobs = call("GET", f"/api/jobs/project/{pid}")
 check("jobs for project (>=9)", c==200 and len(jobs)>=9, len(jobs))

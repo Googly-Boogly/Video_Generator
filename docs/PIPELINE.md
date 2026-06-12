@@ -156,8 +156,11 @@ render_task(final) → assemble.render → media.assemble_video (FFmpeg)
 - **Editor signals:** clip durations, narration durations, the librosa beat grid,
   and audio modes. Cuts are beat-snapped (`on_beat`). The live path sends sampled
   frames to Claude vision; mock is a deterministic rules EDL from the same signals.
-- **v1 simplifications (documented):** transitions are recorded per cut but the
-  render uses hard cuts; ducking is static leveling (music −18 dB under narration).
+- **Transitions:** non-`cut` cuts (and the intro/outro) render as a fade
+  (dip-to-black) — reliable and timeline-exact, so the audio stays in sync.
+  Overlapping crossfade (xfade) is a noted future refinement.
+- **Ducking:** the music bed is **sidechain-compressed** under the narration
+  (`sidechaincompress`), so it dips automatically while the voice is speaking.
 
 ## Hybrid audio strategy
 
@@ -179,13 +182,16 @@ and the mix plan in `pipeline/editor.py`):
 - **Quality gate** flags clips whose native audio contains stray/garbled speech →
   that clip's native track is auto-muted.
 
-## Cost gating
+## Cost: estimate + actual ledger
 
-A cost estimate (`app/cost.py`, computed from the routing table) is available
-before every paid step via `GET /api/projects/{id}/cost?tier=...`. Draft tier uses
-budget models, premium uses the suggested/premium models, and any per-scene
-`model_override` always wins — so the estimate reflects exactly what a real run
-would charge. See [MODELS.md](MODELS.md).
+- **Pre-flight estimate** (`GET …/cost?tier=`) — computed from the routing table
+  before any paid step. Draft uses budget models, premium uses the suggested
+  models, and a per-scene `model_override` always wins.
+- **Actual ledger** (`GET …/costs`) — every paid step appends a `cost_entries` row
+  (keyframes, video, narration, premium hero regen) with the real per-op cost, so
+  the dashboard shows **estimated vs actual by step**. Re-runs append, so the
+  ledger captures regeneration waste. In mock mode the amounts are the would-be
+  cost ($0 actually charged). See [MODELS.md](MODELS.md).
 
 ## Mock mode
 

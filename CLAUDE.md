@@ -9,11 +9,11 @@ behavior or structure changes.
 pipeline. Fully dockerized: `docker compose up` brings up six services
 (`frontend`, `api`, `worker`, `redis`, `postgres`, `minio`).
 
-**Status:** Phases 1–5 done — the full pipeline runs end to end: storyboard + review
-UI; FLUX.2 best-of-N keyframes; video + quality gate; audio build (narration + music
-bed + librosa beat grid + mix); AI editor (EDL) + real FFmpeg 480p/1080p render with
-preview/export. Phase 6 (cost dashboard, polish) remaining.
-See [docs/ROADMAP.md](docs/ROADMAP.md).
+**Status: all 6 phases done** — the full pipeline runs end to end: storyboard +
+review UI; FLUX.2 best-of-N keyframes; video + quality gate; audio build (narration
++ music bed + librosa beat grid + mix); AI editor (EDL) + real FFmpeg 480p/1080p
+render with preview/export; cost dashboard (estimated vs actual ledger).
+See [docs/ROADMAP.md](docs/ROADMAP.md) for refinement ideas.
 
 ## Ports (IMPORTANT — non-default)
 
@@ -49,9 +49,9 @@ the FFmpeg path is exercised. FFmpeg is in the backend image; Phase 3 tests use 
 ```bash
 docker compose up --build              # start everything
 docker compose restart worker          # REQUIRED after editing tasks.py (Celery has no hot-reload)
-docker compose exec api python -m pytest -q     # 57 tests, FFmpeg+librosa in image
+docker compose exec api python -m pytest -q     # 60 tests, FFmpeg+librosa in image
 docker compose exec frontend npm run build      # tsc type-check + prod build
-python scripts/smoke_test.py           # 89 live checks against the running stack
+python scripts/smoke_test.py           # 95 live checks against the running stack
 docker compose logs -f api|worker      # tail logs
 docker compose down -v                 # stop + wipe DB/MinIO/assets
 ```
@@ -93,8 +93,8 @@ backend/app/
   routers/          config projects storyboard keyframes video audio render assets jobs
   main.py
 frontend/src/
-  pages/  Home NewProject StoryboardReview Keyframes Clips Audio Editor
-  components/SceneCard.tsx   lib/api.ts   types.ts
+  pages/  Home NewProject StoryboardReview Keyframes Clips Audio Editor Costs
+  components/  SceneCard.tsx PipelineNav.tsx   lib/api.ts   types.ts
 scripts/smoke_test.py        docs/        docker-compose.yml  .env.example
 ```
 
@@ -104,8 +104,8 @@ Keep all three green under `MOCK_GENERATION=true` (CI must never spend money):
 
 - **pytest** (`backend/tests/`) — unit (`test_pipeline_mock.py`) + API integration
   (`test_api_integration.py`, SQLite + eager Celery + in-memory storage shim).
-  Currently **57 passed**.
-- **smoke** (`scripts/smoke_test.py`) — **89 checks** against the live stack.
+  Currently **60 passed**.
+- **smoke** (`scripts/smoke_test.py`) — **95 checks** against the live stack.
 - **frontend** — `npm run build` must type-check clean (dev mode hides TS errors).
 
 Add a regression test for every behavior you add or bug you fix. See

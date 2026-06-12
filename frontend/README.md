@@ -21,7 +21,10 @@ src/
     Keyframes.tsx          best-of-N keyframe selection (references + variants)
     Clips.tsx              video clips, quality flags, frames, regenerate
     Audio.tsx              voice, music bed + beat grid, narration, mix plan
+    Editor.tsx             EDL timeline + draft/final render + preview/download
+    Costs.tsx              cost dashboard (estimated vs actual ledger by step)
   components/
+    PipelineNav.tsx        stage stepper shown across project pages
     SceneCard.tsx          one editable scene (fields, model picker, audio toggle…)
 ```
 

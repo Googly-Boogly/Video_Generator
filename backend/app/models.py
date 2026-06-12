@@ -56,6 +56,9 @@ class Project(Base):
     )
     jobs: Mapped[list["Job"]] = relationship(back_populates="project", cascade="all, delete-orphan")
     assets: Mapped[list["Asset"]] = relationship(back_populates="project", cascade="all, delete-orphan")
+    cost_entries: Mapped[list["CostEntry"]] = relationship(
+        back_populates="project", cascade="all, delete-orphan"
+    )
 
 
 class Scene(Base):
@@ -132,3 +135,27 @@ class Job(Base):
     )
 
     project: Mapped["Project"] = relationship(back_populates="jobs")
+
+
+class CostEntry(Base):
+    """One line in a project's actual-spend ledger — appended as paid steps run.
+
+    `mock=True` means no money was really charged (the amount is the would-be
+    cost of the operation). Re-runs append new entries, so the ledger reflects
+    accumulated spend including regeneration waste.
+    """
+    __tablename__ = "cost_entries"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    job_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+
+    step: Mapped[str] = mapped_column(String(32))  # keyframes | video | audio | render
+    label: Mapped[str] = mapped_column(String(128))
+    detail: Mapped[str] = mapped_column(String(255), default="")
+    amount: Mapped[float] = mapped_column(Float, default=0.0)
+    mock: Mapped[bool] = mapped_column(default=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    project: Mapped["Project"] = relationship(back_populates="cost_entries")

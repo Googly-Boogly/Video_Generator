@@ -87,3 +87,12 @@ def project_cost(project_id: str, tier: str = "premium", db: Session = Depends(g
         raise HTTPException(404, "project not found")
     tier_enum = Tier.PREMIUM if tier == "premium" else Tier.DRAFT
     return cost_mod.estimate_full_project(project, tier_enum)
+
+
+@router.get("/{project_id}/costs")
+def project_cost_dashboard(project_id: str, db: Session = Depends(get_db)):
+    """Cost dashboard: pre-flight estimate vs the actual-run ledger, by step."""
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "project not found")
+    return cost_mod.dashboard(project)

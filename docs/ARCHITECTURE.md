@@ -78,6 +78,7 @@ terminal state by the time the client first polls.
 | `scenes`   | `scene_number`, `duration_seconds`, `shot_description`, `camera_movement`, `image_prompt`, `video_prompt`, `narration_text`, `audio_mode`, `dialogue_text`, `suggested_model`, `model_override`, `status`, `*_asset_id`, `quality` (JSON) | One shot. Editable in the review UI. |
 | `assets`   | `kind`, `scene_id`, `storage_key`, `content_type`, `meta` (JSON) | Pointer to a MinIO object (keyframe / clip / native_audio / narration / music / draft / final / frame / reference). |
 | `jobs`     | `type`, `status`, `progress`, `scene_id`, `celery_task_id`, `result` (JSON), `error` | One async unit of work; what the UI polls. |
+| `cost_entries` | `step`, `label`, `detail`, `amount`, `mock`, `job_id` | Actual-spend ledger — appended as paid steps run (incl. re-runs). |
 
 `projects → scenes / jobs / assets` cascade delete. Scenes are ordered by
 `scene_number`, which is kept contiguous (1..N) on every add/delete/reorder.
@@ -134,6 +135,7 @@ Failures raise `FFmpegError`. Tested directly in `tests/test_media.py`.
 | `schemas.py` | Pydantic I/O + the validated `Storyboard` structure |
 | `state.py` | Status enums + ordering |
 | `models_config.py` | Model routing table, pricing, `resolve_video_model()` |
+| `cost.py` | Pre-flight estimate + actual-spend ledger (`record_*`, `dashboard`) |
 | `cost.py` | Cost estimator (per step + full project) |
 | `llm.py` | Anthropic wrapper: `complete_json`, `rank_images` (vision) |
 | `storage.py` | MinIO/S3 helper (`put_bytes`, `get_bytes`, `public_url`) |

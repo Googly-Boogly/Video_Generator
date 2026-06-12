@@ -191,7 +191,10 @@ def assemble_video(
 
         fc: list[str] = []
 
-        # --- Video: trim/scale/caption each clip, then concat ---
+        # --- Video: trim/scale/caption + fade transitions, then concat ---
+        # A non-"cut" transition (or the first/last clip) gets a dip-to-black
+        # fade — reliable and timeline-exact, so the audio mix stays in sync.
+        n = len(scenes)
         vlabels = []
         for i, s in enumerate(scenes):
             th, tdur = trims[i]
@@ -200,6 +203,13 @@ def assemble_video(
                 f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
                 f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={fps}"
             )
+            fd = min(0.4, tdur / 3)
+            fade_in = i == 0 or s.get("transition", "cut") != "cut"
+            fade_out = i == n - 1 or (i + 1 < n and scenes[i + 1].get("transition", "cut") != "cut")
+            if fade_in:
+                chain += f",fade=t=in:st=0:d={fd:.3f}"
+            if fade_out:
+                chain += f",fade=t=out:st={tdur - fd:.3f}:d={fd:.3f}"
             cap = (s.get("caption") or "").strip()
             if cap:
                 cf = dp / f"cap{i}.txt"
@@ -234,31 +244,39 @@ def assemble_video(
             nlabels.append(f"[na{i}]")
         fc.append("".join(nlabels) + f"concat=n={len(scenes)}:v=0:a=1[natcat]")
 
-        mix_inputs = ["[natcat]"]
-
         # --- Narration: delay each to its scene offset, mix ---
         narr_labels = []
         for i, s in enumerate(scenes):
             if i in narr_idx:
                 off = int(offsets[i] * 1000)
                 ndb = float(s.get("narration_db", 0.0) or 0.0)
-                fc.append(
-                    f"[{narr_idx[i]}:a]adelay={off}|{off},volume={ndb}dB,{af}[nr{i}]"
-                )
+                fc.append(f"[{narr_idx[i]}:a]adelay={off}|{off},volume={ndb}dB,{af}[nr{i}]")
                 narr_labels.append(f"[nr{i}]")
-        if narr_labels:
-            fc.append("".join(narr_labels) + f"amix=inputs={len(narr_labels)}:normalize=0[narr]")
-            mix_inputs.append("[narr]")
+        have_narr = bool(narr_labels)
+        if have_narr:
+            fc.append("".join(narr_labels) + f"amix=inputs={len(narr_labels)}:normalize=0[narrmix]")
 
         # --- Music bed: pad/trim to total, level ---
-        if music_index is not None:
+        have_music = music_index is not None
+        if have_music:
             fc.append(
                 f"[{music_index}:a]{af},apad,atrim=0:{total:.3f},asetpts=PTS-STARTPTS,"
-                f"volume={music_db}dB[music]"
+                f"volume={music_db}dB[musicraw]"
             )
-            mix_inputs.append("[music]")
 
-        # --- Final mix + limiter ---
+        # --- Final mix: native + narration + (ducked) music + limiter ---
+        mix_inputs = ["[natcat]"]
+        if have_narr and have_music:
+            # Sidechain-duck the music under the narration.
+            fc.append("[narrmix]asplit=2[narrout][narrkey]")
+            fc.append("[musicraw][narrkey]sidechaincompress=threshold=0.03:ratio=8:"
+                      "attack=20:release=400[music]")
+            mix_inputs += ["[narrout]", "[music]"]
+        elif have_narr:
+            mix_inputs.append("[narrmix]")
+        elif have_music:
+            mix_inputs.append("[musicraw]")
+
         if len(mix_inputs) == 1:
             fc.append(f"{mix_inputs[0]}alimiter=limit=0.95[aout]")
         else:

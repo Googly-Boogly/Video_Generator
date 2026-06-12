@@ -14,7 +14,7 @@ app/
   schemas.py       Pydantic I/O + validated Storyboard
   state.py         status enums + ordering
   models_config.py model routing table + resolve_video_model()
-  cost.py          cost estimator
+  cost.py          pre-flight estimate + actual-spend ledger (CostEntry)
   llm.py           Anthropic wrapper (complete_json, rank_images vision)
   storage.py       MinIO/S3 helper
   asset_store.py   store_asset(): put bytes in MinIO + create the Asset row
@@ -33,7 +33,7 @@ tests/             unit + API integration (SQLite + eager Celery)
 
 ```bash
 # Via compose (recommended): see ../README.md
-docker compose exec api python -m pytest -q       # 57 tests (uses FFmpeg + librosa)
+docker compose exec api python -m pytest -q       # 60 tests (uses FFmpeg + librosa)
 
 # Standalone uvicorn (needs Postgres/Redis/MinIO reachable):
 uvicorn app.main:app --reload

@@ -3,11 +3,11 @@
 Turn a single text prompt into a finished short film with audio, through an AI
 pipeline. Fully dockerized — one `docker compose up` brings up everything.
 
-> **Status:** Phases 1–5 complete — the **full pipeline runs end to end**:
+> **Status: all 6 phases complete** — the **full pipeline runs end to end**:
 > storyboard + review UI → FLUX.2 best-of-N keyframes → video + quality gate →
 > audio build (narration + music bed + **librosa** beat grid) → AI editor (EDL) →
-> real FFmpeg **480p draft / 1080p final** render with preview + export. Phase 6
-> (cost dashboard, polish) remaining. See [docs/ROADMAP.md](docs/ROADMAP.md).
+> real FFmpeg **480p draft / 1080p final** render with preview, export, and a
+> **cost dashboard** (estimated vs actual). See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ---
 
@@ -58,6 +58,8 @@ spend**. Flip `MOCK_GENERATION=false` and supply keys to go live (see
 7. The **AI editor** assembles an Edit Decision List (trims, transitions, captions,
    beat-snap, mix); **FFmpeg renders** a 480p watermarked draft, then a 1080p final
    (hero shots regenerated at premium). Preview and **download** in the browser.
+8. A **cost dashboard** tracks estimated vs actual spend per step (re-runs included);
+   a pipeline stepper and project history tie it all together.
 
 ## Documentation
 
@@ -81,9 +83,9 @@ Anthropic SDK, ElevenLabs. Assembly: FFmpeg. Storage: MinIO (S3-compatible).
 
 ```bash
 # Self-contained unit + API integration tests (SQLite + eager Celery, no infra)
-docker compose exec api python -m pytest -q          # 57 passed
+docker compose exec api python -m pytest -q          # 60 passed
 
-# Live smoke test against the running stack (89 checks across every endpoint)
+# Live smoke test against the running stack (95 checks across every endpoint)
 python scripts/smoke_test.py
 
 # Frontend type-check + production build

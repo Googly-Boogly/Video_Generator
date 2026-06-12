@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { api, assetUrl, pollJob } from "../lib/api";
 import type { Edl } from "../lib/api";
 import type { Asset, Project } from "../types";
+import PipelineNav from "../components/PipelineNav";
 
 function db(v: number | null | undefined) {
   if (v === null || v === undefined) return "—";
@@ -55,6 +56,7 @@ export default function Editor() {
 
   return (
     <div className="space-y-6">
+      <PipelineNav projectId={project.id} status={project.status} />
       <div className="flex items-start justify-between gap-4">
         <div>
           <Link to={`/projects/${project.id}/audio`} className="text-xs text-slate-500 hover:text-accent2">

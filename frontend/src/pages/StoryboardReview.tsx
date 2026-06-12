@@ -3,6 +3,7 @@ import { useParams, Link, useNavigate } from "react-router-dom";
 import { api, pollJob } from "../lib/api";
 import type { AppConfig, CostEstimate, ModelInfo, Project, Scene } from "../types";
 import SceneCard from "../components/SceneCard";
+import PipelineNav from "../components/PipelineNav";
 
 export default function StoryboardReview() {
   const { id } = useParams<{ id: string }>();
@@ -143,6 +144,7 @@ export default function StoryboardReview() {
 
   return (
     <div className="space-y-6">
+      {!generating && <PipelineNav projectId={project.id} status={project.status} />}
       <div className="flex items-start justify-between gap-4">
         <div>
           <Link to="/" className="text-xs text-slate-500 hover:text-accent2">← All projects</Link>

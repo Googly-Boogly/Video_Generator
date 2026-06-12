@@ -10,6 +10,7 @@ import Keyframes from "./pages/Keyframes";
 import Clips from "./pages/Clips";
 import Audio from "./pages/Audio";
 import Editor from "./pages/Editor";
+import Costs from "./pages/Costs";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
@@ -23,6 +24,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           <Route path="projects/:id/clips" element={<Clips />} />
           <Route path="projects/:id/audio" element={<Audio />} />
           <Route path="projects/:id/editor" element={<Editor />} />
+          <Route path="projects/:id/costs" element={<Costs />} />
         </Route>
       </Routes>
     </BrowserRouter>

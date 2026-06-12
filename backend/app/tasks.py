@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 from contextlib import contextmanager
 
+from . import cost
 from .celery_app import celery_app
 from .database import SessionLocal
 from .models import Asset, Job, Project, Scene
@@ -174,6 +175,7 @@ def generate_keyframes_task(self, project_id: str, job_id: str, scene_id: str | 
         for i, scene in enumerate(scenes):
             try:
                 _keyframes_for_scene(db, project, scene, kf_stage, reference_urls, char_sheet)
+                cost.record_keyframes(db, project.id, job_id, scene.scene_number)
                 done += 1
             except Exception as exc:  # noqa: BLE001 — isolate per-scene failures
                 log.exception("keyframes failed for scene %s", scene.scene_number)
@@ -265,6 +267,15 @@ def _keyframes_for_scene(db, project: Project, scene: Scene, kf_stage, reference
     db.flush()
 
 
+def _record_clip_cost(db, project, scene, job_id, step) -> None:
+    """Record the actual clip cost from the model recorded on the clip asset."""
+    clip = db.get(Asset, scene.clip_asset_id) if scene.clip_asset_id else None
+    model_id = (clip.meta or {}).get("model_id") if clip else None
+    if model_id:
+        cost.record_clip(db, project.id, job_id, scene.scene_number, model_id,
+                         scene.duration_seconds, step=step)
+
+
 def _store_asset(db, project_id, scene_id, kind, data: bytes, content_type, meta=None) -> Asset:
     """Put bytes in MinIO and create the Asset row pointing at them."""
     from .asset_store import store_asset
@@ -315,6 +326,7 @@ def generate_video_task(self, project_id: str, job_id: str, tier: str = "draft",
                 )
                 done += 1
                 flagged += 1 if state == "flagged" else 0
+                _record_clip_cost(db, project, scene, job_id, "video")
             except Exception as exc:  # noqa: BLE001 — isolate per-scene failures
                 log.exception("video failed for scene %s", scene.scene_number)
                 scene.status = SceneStatus.FAILED.value
@@ -445,6 +457,8 @@ def build_audio_task(self, project_id: str, job_id: str, scene_id: str | None = 
                     skipped += 1
                 else:
                     _narration_for_scene(db, project, scene, voice_id, a_stage)
+                    cost.record_narration(db, project.id, job_id, scene.scene_number,
+                                          len(scene.narration_text))
                     narrated += 1
             except Exception as exc:  # noqa: BLE001 — isolate per-scene failures
                 log.exception("narration failed for scene %s", scene.scene_number)
@@ -562,6 +576,7 @@ def render_task(self, project_id: str, job_id: str, final: bool = False) -> dict
                 try:
                     _clip_for_scene(db, project, s, v_stage, q_stage, Tier.PREMIUM,
                                     char_sheet, ref_urls, get_bytes, public_url)
+                    _record_clip_cost(db, project, s, job_id, "render")
                     regenerated += 1
                 except Exception:  # noqa: BLE001
                     log.exception("hero regen failed for scene %s", s.scene_number)
@@ -637,6 +652,7 @@ def _render_scene_inputs(db, project: Project, get_bytes) -> list[dict]:
             "trim_head": cut.get("trim_head", 0.0),
             "trim_tail": cut.get("trim_tail", 0.0),
             "caption": cut.get("caption", ""),
+            "transition": cut.get("transition", "cut"),
             "audio_mode": scene.audio_mode,
             "narration_db": mix.get("narration_db"),
             "native_db": mix.get("native_db"),

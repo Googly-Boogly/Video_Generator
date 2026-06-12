@@ -64,10 +64,20 @@ success the project advances to `storyboarded` and gains scenes. Calling it agai
 regenerates the storyboard.
 
 ### `GET /api/projects/{id}/cost?tier=premium|draft`
-Cost estimate for the whole project at the given render tier.
+Pre-flight cost **estimate** for the whole project at the given render tier.
 ```jsonc
 { "step": "full_project", "currency": "USD", "total": 4.71,
   "line_items": [{ "label": "Keyframes", "detail": "best-of-N", "amount": 0.45 }, ...] }
+```
+
+### `GET /api/projects/{id}/costs`
+Cost **dashboard** — estimate vs the actual-run ledger, grouped by step:
+```jsonc
+{ "currency": "USD", "mock": true,
+  "estimated": { "total": 1.94, "line_items": [ ... ] },
+  "actual": { "total": 1.34, "by_step": { "keyframes": 0.225, "video": 1.05, "audio": 0.06 },
+              "entries": [ { "step": "keyframes", "label": "Scene 1 keyframes",
+                             "detail": "3× FLUX.2 [dev]", "amount": 0.075, "mock": true } ] } }
 ```
 
 ---

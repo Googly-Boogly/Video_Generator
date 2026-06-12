@@ -3,6 +3,9 @@
 Build order. Each phase is demoable on its own; mock mode lets later phases be
 built before any real provider is wired.
 
+> **All six phases are complete** — the full pipeline runs end to end (prompt →
+> downloadable film). Remaining items are refinements, listed under Phase 6.
+
 ## ✅ Phase 1 — Foundation + storyboard review (done)
 
 - Compose stack scaffolded; all six services healthy on `docker compose up`.
@@ -83,12 +86,22 @@ built before any real provider is wired.
   `pipeline/assemble.py`, `routers/render.py`, frontend `pages/Editor.tsx`.
 - Tests: 57 pytest + 89-check live smoke.
 
-## 🔜 Phase 6 — History, cost dashboard, polish
+## ✅ Phase 6 — History, cost dashboard, polish (done)
 
-- ✅ In-browser player + download/export; ✅ project history (Home) with "▶ watch".
-- Remaining: cost dashboard (estimated vs actual), crossfade transitions in the
-  render (v1 uses hard cuts; transitions are recorded in the EDL), sidechain
-  ducking (v1 uses static −18 dB music under narration), general polish.
+- **Cost dashboard:** a per-project ledger (`cost_entries`) records what every paid
+  step actually ran (keyframes, video, narration, premium hero regen), so the
+  dashboard shows **estimated (full premium) vs actual** by step — re-runs append,
+  surfacing regeneration waste. In mock mode the amounts are the would-be cost with
+  a "$0 actually charged" banner. `GET /api/projects/{id}/costs`, `pages/Costs.tsx`.
+- **Render polish:** fade (dip-to-black) transitions for non-`cut` cuts +
+  intro/outro, and **sidechain ducking** of the music under narration.
+- **Polish:** a `PipelineNav` stepper across project pages; in-browser player +
+  download/export; project history (Home) with "▶ watch".
+- Tests: 60 pytest + 95-check live smoke.
+
+### Possible future refinements
+- Overlapping crossfade (xfade) instead of dip-to-black; cost ceilings/alerts;
+  multi-project cost rollup; richer history page.
 
 ---
 

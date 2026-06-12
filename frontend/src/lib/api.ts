@@ -139,7 +139,21 @@ export const api = {
   render: (pid: string, final: boolean) =>
     req<Job>(`/api/projects/${pid}/render?final=${final}`, { method: "POST" }),
   listRenders: (pid: string) => req<Asset[]>(`/api/projects/${pid}/renders`),
+
+  // --- Phase 6: cost dashboard ---
+  costDashboard: (pid: string) => req<CostDashboard>(`/api/projects/${pid}/costs`),
 };
+
+export interface CostDashboard {
+  currency: string;
+  mock: boolean;
+  estimated: { total: number; line_items: { label: string; detail: string; amount: number }[] };
+  actual: {
+    total: number;
+    by_step: Record<string, number>;
+    entries: { step: string; label: string; detail: string; amount: number; mock: boolean }[];
+  };
+}
 
 export interface EdlCut {
   scene_number: number;

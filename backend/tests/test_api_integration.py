@@ -404,6 +404,55 @@ def test_dialogue_scene_skips_narration(client):
     assert s["mix"]["narration_db"] is None
 
 
+# --- Phase 6: cost dashboard --------------------------------------------------
+
+def test_cost_dashboard_records_actual_spend(client):
+    p = _make_project(client, target_length=15)
+    _storyboard(client, p["id"])
+    pid = p["id"]
+    _keyframes(client, pid)
+    _video(client, pid)
+    _audio(client, pid)
+
+    d = client.get(f"/api/projects/{pid}/costs").json()
+    assert d["mock"] is True
+    assert d["estimated"]["total"] > 0
+    assert d["actual"]["total"] > 0
+    # every paid step recorded something
+    assert d["actual"]["by_step"]["keyframes"] > 0
+    assert d["actual"]["by_step"]["video"] > 0
+    assert d["actual"]["by_step"]["audio"] > 0
+    assert len(d["actual"]["entries"]) >= 3
+    assert d["actual"]["entries"][0]["mock"] is True
+    # by_step sums to the actual total
+    assert abs(sum(d["actual"]["by_step"].values()) - d["actual"]["total"]) < 1e-6
+
+
+def test_cost_ledger_accumulates_on_rerun(client):
+    p = _make_project(client, target_length=15)
+    _storyboard(client, p["id"])
+    pid = p["id"]
+    _keyframes(client, pid)
+    before = client.get(f"/api/projects/{pid}/costs").json()["actual"]["total"]
+    sid = client.get(f"/api/projects/{pid}/scenes").json()[0]["id"]
+    r = client.post(f"/api/projects/{pid}/scenes/{sid}/keyframes")
+    assert client.get(f"/api/jobs/{r.json()['id']}").json()["status"] == "success"
+    after = client.get(f"/api/projects/{pid}/costs").json()["actual"]["total"]
+    assert after > before  # re-running adds to the ledger (regeneration waste)
+
+
+def test_final_render_adds_premium_render_cost(client):
+    p = _edit_ready(client)
+    pid = p["id"]
+    sid = client.get(f"/api/projects/{pid}/scenes").json()[0]["id"]
+    client.patch(f"/api/projects/{pid}/scenes/{sid}",
+                 json={"audio_mode": "dialogue", "dialogue_text": "hi"})
+    _run(client, f"/api/projects/{pid}/edl")
+    _run(client, f"/api/projects/{pid}/render?final=true")
+    by_step = client.get(f"/api/projects/{pid}/costs").json()["actual"]["by_step"]
+    assert by_step.get("render", 0) > 0  # hero scene regenerated at premium
+
+
 # --- Phase 5: AI editor (EDL) + render ----------------------------------------
 
 def _edit_ready(client, **over):

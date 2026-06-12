@@ -6,8 +6,8 @@ Three layers, all runnable with **zero API spend** (mock mode):
 | ----- | ---- | ------------ | -------------- |
 | Unit (pipeline) | `backend/tests/test_pipeline_mock.py` | FFmpeg + librosa (in the image) | Storyboard validation, prompt dialects, model/tier resolution, best-of-N ranking, clip encode + demux + frame extract, voices/mix levels, narration synth, librosa beat grid, **EDL structure + beat-snap** |
 | Unit (media) | `backend/tests/test_media.py` | FFmpeg (in the image) | `media.py` directly: encode, demux, frame extract, music-bed synth, **`assemble_video` draft 480p / final 1080p with audio** |
-| Integration (API) | `backend/tests/test_api_integration.py` | none (SQLite + eager Celery + in-memory storage shim) | Every HTTP endpoint incl. keyframes/video/audio/**EDL+render**, failure isolation, rebuild/full-regenerate (no cascade), **hero regen on final, render replace**, error paths |
-| Smoke (live) | `scripts/smoke_test.py` | running stack | 89 checks against the real API + worker + Postgres + Redis + **MinIO** |
+| Integration (API) | `backend/tests/test_api_integration.py` | none (SQLite + eager Celery + in-memory storage shim) | Every HTTP endpoint incl. keyframes/video/audio/EDL+render/**cost dashboard**, failure isolation, rebuild/regenerate (no cascade), hero regen, **ledger accumulation**, error paths |
+| Smoke (live) | `scripts/smoke_test.py` | running stack | 95 checks against the real API + worker + Postgres + Redis + **MinIO** |
 
 > The integration harness (`conftest.py`) also patches the storage helpers with an
 > in-memory shim, so keyframe/asset tests need no MinIO.
@@ -26,7 +26,7 @@ docker compose exec api python -m pytest -q
 cd backend && MOCK_GENERATION=true python -m pytest -q
 ```
 
-Expected: **57 passed** (26 unit + 31 integration).
+Expected: **60 passed** (26 unit + 34 integration).
 
 > The media/audio/Phase 3 tests invoke real FFmpeg + librosa (present in the
 > backend image), so run them in the container — encoding/demux/frame-extraction
@@ -52,8 +52,9 @@ project. It also runs Phase 2 (keyframes best-of-N, override, regenerate), Phase
 (clip generation, playable-mp4, native audio, quality frames, regenerate),
 Phase 4 (voices/library, library bed + **librosa** beat grid, narration build +
 rebuild without duplication, mix plan), and Phase 5 (build EDL, **render draft 480p
-+ final 1080p**, status transitions, download header). Prints `PASS`/`FAIL` per
-check and exits non-zero on any failure. Expected: **89 passed, 0 failed**.
++ final 1080p**, status transitions, download header), and Phase 6 (**cost
+dashboard** — estimate vs actual ledger by step). Prints `PASS`/`FAIL` per check
+and exits non-zero on any failure. Expected: **95 passed, 0 failed**.
 
 ## Frontend
 
@@ -91,6 +92,9 @@ module on request in dev, surfacing import/parse errors immediately.
   and 1080p final** (ffprobe-verified resolution + audio); status transitions
   `edited → draft_rendered → rendered`; hero-scene regen on final; render replaces
   the prior of its tier; export download header.
+- Cost dashboard: the ledger records actual per-step spend (keyframes/video/audio/
+  render), `by_step` sums to the total, **re-runs accumulate**, premium hero regen
+  adds a `render` cost, entries are flagged `mock`, and delete cascades the ledger.
 - Frontend: every TS/TSX module transforms cleanly through Vite + `npm run build`
   type-checks; UI served at `:5273`.
 
