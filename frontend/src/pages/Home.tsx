@@ -68,6 +68,11 @@ export default function Home() {
                 <span>{p.target_length}s</span>
                 <span>{p.aspect_ratio}</span>
                 <span className="capitalize">{p.style_preset}</span>
+                {["draft_rendered", "rendered"].includes(p.status) && (
+                  <Link to={`/projects/${p.id}/editor`} className="ml-auto text-accent2 hover:underline">
+                    ▶ watch
+                  </Link>
+                )}
               </div>
             </div>
           ))}

@@ -24,7 +24,7 @@ def _to_out(a: Asset) -> AssetOut:
 
 
 @router.get("/{asset_id}/content")
-def asset_content(asset_id: str, db: Session = Depends(get_db)):
+def asset_content(asset_id: str, download: bool = False, db: Session = Depends(get_db)):
     from ..storage import get_bytes
 
     asset = db.get(Asset, asset_id)
@@ -34,8 +34,11 @@ def asset_content(asset_id: str, db: Session = Depends(get_db)):
         data = get_bytes(asset.storage_key)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(502, f"storage error: {exc}")
-    return Response(content=data, media_type=asset.content_type,
-                    headers={"Cache-Control": "public, max-age=86400"})
+    headers = {"Cache-Control": "public, max-age=86400"}
+    if download:
+        ext = asset.storage_key.rsplit(".", 1)[-1]
+        headers["Content-Disposition"] = f'attachment; filename="storyforge-{asset.kind}-{asset.id[:8]}.{ext}"'
+    return Response(content=data, media_type=asset.content_type, headers=headers)
 
 
 @router.get("/{asset_id}", response_model=AssetOut)

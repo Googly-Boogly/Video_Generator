@@ -121,6 +121,166 @@ def duration_of(*, audio_or_video_bytes: bytes, suffix: str = ".mp4") -> float:
         return _probe_duration(p) or 0.0
 
 
+FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+
+# Output resolution per render tier.
+_DRAFT_DIMS = {"16:9": (854, 480), "9:16": (480, 854), "1:1": (480, 480)}
+_FINAL_DIMS = {"16:9": (1920, 1080), "9:16": (1080, 1920), "1:1": (1080, 1080)}
+
+
+def assemble_video(
+    *, draft: bool, aspect_ratio: str, scenes: list[dict],
+    music_bytes: bytes | None = None, music_db: float = -18.0, fps: int = 24,
+) -> bytes:
+    """Execute an EDL with FFmpeg into a single H.264/AAC film.
+
+    Each scene dict: {clip_bytes, narration_bytes?, trim_head, trim_tail, caption,
+    audio_mode, narration_db, native_db, duration}. Builds the hybrid audio mix:
+    native (ducked) from each clip + narration (delayed per scene) + a music bed,
+    burns captions, and watermarks the draft. Returns mp4 bytes.
+    """
+    dims = (_DRAFT_DIMS if draft else _FINAL_DIMS).get(aspect_ratio, (854, 480) if draft else (1920, 1080))
+    w, h = dims
+    af = "aformat=sample_rates=44100:channel_layouts=stereo"
+
+    with tempfile.TemporaryDirectory() as d:
+        dp = Path(d)
+        in_args: list[str] = []
+        count = 0
+
+        def add_input(path: Path) -> int:
+            nonlocal count
+            in_args.extend(["-i", str(path)])
+            idx = count
+            count += 1
+            return idx
+
+        # Clip inputs (each provides [i:v] and [i:a] = native audio).
+        clip_idx, durs = [], []
+        for i, s in enumerate(scenes):
+            f = dp / f"clip{i}.mp4"
+            f.write_bytes(s["clip_bytes"])
+            clip_idx.append(add_input(f))
+            durs.append(_probe_duration(f) or float(s.get("duration", 5.0)))
+
+        # Narration inputs (narrated scenes only).
+        narr_idx: dict[int, int] = {}
+        for i, s in enumerate(scenes):
+            nb = s.get("narration_bytes")
+            if nb and s.get("narration_db") is not None and s.get("audio_mode") != "dialogue":
+                f = dp / f"narr{i}.wav"
+                f.write_bytes(nb)
+                narr_idx[i] = add_input(f)
+
+        music_index = None
+        if music_bytes:
+            f = dp / "music.aud"
+            f.write_bytes(music_bytes)
+            music_index = add_input(f)
+
+        # Trimmed durations + timeline offsets.
+        trims, offsets, t = [], [], 0.0
+        for i, s in enumerate(scenes):
+            th = max(0.0, float(s.get("trim_head", 0) or 0))
+            tt = max(0.0, float(s.get("trim_tail", 0) or 0))
+            tdur = max(0.3, durs[i] - th - tt)
+            trims.append((th, tdur))
+            offsets.append(t)
+            t += tdur
+        total = t
+
+        fc: list[str] = []
+
+        # --- Video: trim/scale/caption each clip, then concat ---
+        vlabels = []
+        for i, s in enumerate(scenes):
+            th, tdur = trims[i]
+            chain = (
+                f"[{clip_idx[i]}:v]trim=start={th:.3f}:end={th + tdur:.3f},setpts=PTS-STARTPTS,"
+                f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
+                f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={fps}"
+            )
+            cap = (s.get("caption") or "").strip()
+            if cap:
+                cf = dp / f"cap{i}.txt"
+                cf.write_text(cap)
+                fs = max(18, int(h * 0.05))
+                chain += (
+                    f",drawtext=fontfile={FONT}:textfile={cf}:x=(w-text_w)/2:y=h-{fs * 2}:"
+                    f"fontsize={fs}:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=10"
+                )
+            fc.append(f"{chain}[v{i}]")
+            vlabels.append(f"[v{i}]")
+        fc.append("".join(vlabels) + f"concat=n={len(scenes)}:v=1:a=0[vcat]")
+        if draft:
+            fs = max(16, int(h * 0.05))
+            fc.append(
+                f"[vcat]drawtext=fontfile={FONT}:text='DRAFT':x=20:y=20:fontsize={fs}:"
+                f"fontcolor=white@0.45:box=1:boxcolor=black@0.25:boxborderw=6[vout]"
+            )
+        else:
+            fc.append("[vcat]null[vout]")
+
+        # --- Native audio: trim+level each clip's track, concat ---
+        nlabels = []
+        for i, s in enumerate(scenes):
+            th, tdur = trims[i]
+            db = s.get("native_db")
+            vol = -100.0 if db is None else float(db)  # muted/None -> silence
+            fc.append(
+                f"[{clip_idx[i]}:a]atrim=start={th:.3f}:end={th + tdur:.3f},asetpts=PTS-STARTPTS,"
+                f"volume={vol}dB,{af}[na{i}]"
+            )
+            nlabels.append(f"[na{i}]")
+        fc.append("".join(nlabels) + f"concat=n={len(scenes)}:v=0:a=1[natcat]")
+
+        mix_inputs = ["[natcat]"]
+
+        # --- Narration: delay each to its scene offset, mix ---
+        narr_labels = []
+        for i, s in enumerate(scenes):
+            if i in narr_idx:
+                off = int(offsets[i] * 1000)
+                ndb = float(s.get("narration_db", 0.0) or 0.0)
+                fc.append(
+                    f"[{narr_idx[i]}:a]adelay={off}|{off},volume={ndb}dB,{af}[nr{i}]"
+                )
+                narr_labels.append(f"[nr{i}]")
+        if narr_labels:
+            fc.append("".join(narr_labels) + f"amix=inputs={len(narr_labels)}:normalize=0[narr]")
+            mix_inputs.append("[narr]")
+
+        # --- Music bed: pad/trim to total, level ---
+        if music_index is not None:
+            fc.append(
+                f"[{music_index}:a]{af},apad,atrim=0:{total:.3f},asetpts=PTS-STARTPTS,"
+                f"volume={music_db}dB[music]"
+            )
+            mix_inputs.append("[music]")
+
+        # --- Final mix + limiter ---
+        if len(mix_inputs) == 1:
+            fc.append(f"{mix_inputs[0]}alimiter=limit=0.95[aout]")
+        else:
+            fc.append(
+                "".join(mix_inputs) + f"amix=inputs={len(mix_inputs)}:normalize=0[mx];"
+                "[mx]alimiter=limit=0.95[aout]"
+            )
+
+        out = dp / "out.mp4"
+        _run([
+            "ffmpeg", "-y", "-loglevel", "error", *in_args,
+            "-filter_complex", ";".join(fc),
+            "-map", "[vout]", "-map", "[aout]",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast",
+            "-crf", "28" if draft else "20",
+            "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart",
+            "-t", f"{total:.3f}",
+            str(out),
+        ])
+        return out.read_bytes()
+
+
 def synth_music_bed(*, bpm: int, seconds: float, style: str = "ambient") -> bytes:
     """Synthesize a placeholder music bed with a clear beat at `bpm`.
 

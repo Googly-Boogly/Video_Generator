@@ -138,12 +138,12 @@ Failures raise `FFmpegError`. Tested directly in `tests/test_media.py`.
 | `llm.py` | Anthropic wrapper: `complete_json`, `rank_images` (vision) |
 | `storage.py` | MinIO/S3 helper (`put_bytes`, `get_bytes`, `public_url`) |
 | `asset_store.py` | Shared `store_asset()` — put bytes in MinIO + create the `Asset` row |
-| `media.py` | FFmpeg: encode clip, demux native audio, extract frames, synth music bed |
+| `media.py` | FFmpeg: encode clip, demux native audio, extract frames, synth music bed, **assemble_video** (render the EDL) |
 | `providers/` | `fal_provider` (image/video), `elevenlabs_provider` (TTS/voices) — behind the mock flag |
 | `celery_app.py` | Celery app + config |
 | `tasks.py` | Celery tasks (the only place generation runs) |
 | `pipeline/` | One module per stage — independently testable |
-| `routers/` | FastAPI routers: `config`, `projects`, `storyboard`, `keyframes`, `video`, `audio`, `assets`, `jobs` |
+| `routers/` | FastAPI routers: `config`, `projects`, `storyboard`, `keyframes`, `video`, `audio`, `render`, `assets`, `jobs` |
 | `main.py` | App assembly, CORS, lifespan (DB + bucket init) |
 
 See [PIPELINE.md](PIPELINE.md) for the pipeline modules and [API.md](API.md) for

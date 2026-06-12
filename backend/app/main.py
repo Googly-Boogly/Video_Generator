@@ -15,6 +15,7 @@ from .routers import config as config_router
 from .routers import jobs as jobs_router
 from .routers import keyframes as keyframes_router
 from .routers import projects as projects_router
+from .routers import render as render_router
 from .routers import storyboard as storyboard_router
 from .routers import video as video_router
 
@@ -56,6 +57,7 @@ app.include_router(storyboard_router.router)
 app.include_router(keyframes_router.router)
 app.include_router(video_router.router)
 app.include_router(audio_router.router)
+app.include_router(render_router.router)
 app.include_router(assets_router.router)
 app.include_router(jobs_router.router)
 

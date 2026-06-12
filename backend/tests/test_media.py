@@ -77,3 +77,49 @@ def test_synth_music_bed_and_duration():
     assert isinstance(bed, bytes) and len(bed) > 500
     dur = media.duration_of(audio_or_video_bytes=bed, suffix=".mp3")
     assert 2.0 < dur < 4.5
+
+
+def _probe_dims(data: bytes) -> tuple[int, int, set]:
+    import subprocess, tempfile, json
+    from pathlib import Path
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d) / "v.mp4"
+        p.write_bytes(data)
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries",
+             "stream=codec_type,width,height", "-of", "json", str(p)],
+            capture_output=True, text=True,
+        ).stdout
+    info = json.loads(out)
+    v = next(s for s in info["streams"] if s["codec_type"] == "video")
+    types = {s["codec_type"] for s in info["streams"]}
+    return v["width"], v["height"], types
+
+
+def _two_scene_render(draft: bool) -> bytes:
+    clip_a = media.image_to_clip(image_bytes=mock.placeholder_png("a"), duration=1.5, aspect_ratio="16:9")
+    clip_b = media.image_to_clip(image_bytes=mock.placeholder_png("b"), duration=1.5, aspect_ratio="16:9")
+    scenes = [
+        {"clip_bytes": clip_a, "narration_bytes": mock.silent_wav(1.0), "trim_head": 0.1,
+         "trim_tail": 0.1, "caption": "Scene one, a test", "audio_mode": "narrated",
+         "narration_db": 0.0, "native_db": -16.0, "duration": 1.5},
+        {"clip_bytes": clip_b, "narration_bytes": None, "trim_head": 0.1, "trim_tail": 0.1,
+         "caption": "Scene two", "audio_mode": "dialogue", "narration_db": None,
+         "native_db": 0.0, "duration": 1.5},
+    ]
+    music = media.synth_music_bed(bpm=120, seconds=6, style="ambient")
+    return media.assemble_video(draft=draft, aspect_ratio="16:9", scenes=scenes, music_bytes=music)
+
+
+def test_assemble_draft_is_480p_with_audio():
+    out = _two_scene_render(draft=True)
+    assert out[4:8] == b"ftyp"
+    w, h, types = _probe_dims(out)
+    assert (w, h) == (854, 480)
+    assert "video" in types and "audio" in types
+
+
+def test_assemble_final_is_1080p():
+    out = _two_scene_render(draft=False)
+    w, h, _ = _probe_dims(out)
+    assert (w, h) == (1920, 1080)

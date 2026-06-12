@@ -5,6 +5,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     curl \
     libsndfile1 \
+    fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 ENV PYTHONUNBUFFERED=1 \

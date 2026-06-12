@@ -404,6 +404,85 @@ def test_dialogue_scene_skips_narration(client):
     assert s["mix"]["narration_db"] is None
 
 
+# --- Phase 5: AI editor (EDL) + render ----------------------------------------
+
+def _edit_ready(client, **over):
+    p = _make_project(client, target_length=15, **over)
+    _storyboard(client, p["id"])
+    _keyframes(client, p["id"])
+    _video(client, p["id"])
+    return p
+
+
+def _run(client, path):
+    r = client.post(path)
+    assert r.status_code == 202, r.text
+    final = client.get(f"/api/jobs/{r.json()['id']}").json()
+    assert final["status"] == "success", final
+    return final
+
+
+def test_edl_then_draft_then_final_render(client):
+    p = _edit_ready(client)
+    pid = p["id"]
+
+    job = _run(client, f"/api/projects/{pid}/edl")
+    assert job["result"]["cuts"] >= 1
+    edl = client.get(f"/api/projects/{pid}/edl").json()
+    assert edl["total_duration"] > 0 and len(edl["cuts"]) >= 1
+    assert client.get(f"/api/projects/{pid}").json()["status"] == "edited"
+
+    dr = _run(client, f"/api/projects/{pid}/render?final=false")
+    assert dr["result"]["kind"] == "draft"
+    assert client.get(f"/api/projects/{pid}").json()["status"] == "draft_rendered"
+    renders = client.get(f"/api/projects/{pid}/renders").json()
+    draft = next(a for a in renders if a["kind"] == "draft")
+    assert draft["meta"]["resolution"] == "480p"
+    assert draft["content_type"] == "video/mp4"
+    assert client.get(draft["url"]).content[4:8] == b"ftyp"  # playable mp4
+
+    fr = _run(client, f"/api/projects/{pid}/render?final=true")
+    assert fr["result"]["kind"] == "final"
+    assert client.get(f"/api/projects/{pid}").json()["status"] == "rendered"
+    final = next(a for a in client.get(f"/api/projects/{pid}/renders").json() if a["kind"] == "final")
+    assert final["meta"]["resolution"] == "1080p"
+
+
+def test_edl_requires_clips(client):
+    p = _make_project(client, target_length=15)
+    _storyboard(client, p["id"])
+    assert client.post(f"/api/projects/{p['id']}/edl").status_code == 400
+
+
+def test_render_requires_edl(client):
+    p = _make_project(client, target_length=15)
+    _storyboard(client, p["id"])
+    assert client.post(f"/api/projects/{p['id']}/render").status_code == 400
+    assert client.get(f"/api/projects/{p['id']}/edl").status_code == 404
+
+
+def test_final_render_regenerates_hero_scenes(client):
+    p = _edit_ready(client)
+    pid = p["id"]
+    sid = client.get(f"/api/projects/{pid}/scenes").json()[0]["id"]
+    client.patch(f"/api/projects/{pid}/scenes/{sid}",
+                 json={"audio_mode": "dialogue", "dialogue_text": "We made it."})
+    _run(client, f"/api/projects/{pid}/edl")
+    fr = _run(client, f"/api/projects/{pid}/render?final=true")
+    assert fr["result"]["regenerated"] >= 1  # the dialogue scene is a hero shot
+
+
+def test_render_replaces_previous_of_same_tier(client):
+    p = _edit_ready(client)
+    pid = p["id"]
+    _run(client, f"/api/projects/{pid}/edl")
+    _run(client, f"/api/projects/{pid}/render?final=false")
+    first = next(a for a in client.get(f"/api/projects/{pid}/renders").json() if a["kind"] == "draft")
+    _run(client, f"/api/projects/{pid}/render?final=false")
+    drafts = [a for a in client.get(f"/api/projects/{pid}/renders").json() if a["kind"] == "draft"]
+    assert len(drafts) == 1 and drafts[0]["id"] != first["id"]  # replaced, not duplicated
+
+
 def test_music_upload_and_remove(client):
     from app.pipeline import mock
     p = _make_project(client, target_length=15)

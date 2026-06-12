@@ -20,9 +20,9 @@ style_bible → storyboard → keyframes → video → quality → audio → edi
 | 6 | Video generation | `video.py` | ✅ 3 | One clip/scene via the routed model (tier-aware) + demuxed native audio |
 | 7 | Quality gate | `quality.py` | ✅ 3 | 4 frames/clip + Claude-vision artifact/identity flags + garbled-speech auto-mute |
 | 8 | Audio build | `audio.py` | ✅ 4 | ElevenLabs narration (locked voice), music bed + librosa beat grid, native-track mix plan |
-| 9 | AI editor | `editor.py` | 🔜 5 | Edit Decision List (order, trims, transitions, captions, mix plan) |
-| 10 | Draft → final render | `assemble.py` | 🔜 5 | 480p watermarked draft, then 1080p H.264/AAC final |
-| 11 | Preview & export | (API + UI) | 🔜 6 | In-browser player, download, history |
+| 9 | AI editor | `editor.py` | ✅ 5 | Edit Decision List (order, trims, transitions, captions, beat-snap, mix plan) |
+| 10 | Draft → final render | `assemble.py` + `media.py` | ✅ 5 | Real FFmpeg: 480p watermarked draft → 1080p H.264/AAC final with hybrid audio mix |
+| 11 | Preview & export | (API + UI) | ✅ 5 | In-browser player, download (Content-Disposition), history with "▶ watch" |
 
 ✅ = implemented in Phase 1 · 🔜 = scaffolded with a working mock path; real
 provider integration arrives in the noted phase (`NotImplementedError` is raised
@@ -132,6 +132,33 @@ build_audio_task(project_id, [scene_id])
 - Narration is one asset per narrated scene; rebuilding replaces (never duplicates)
   them.
 
+## AI editor + render (Phase 5)
+
+```
+build_edl_task → editor.build_edl(scenes, beat_grid)
+   EDL = { total_duration, cuts[{scene_number, in, out, trim_head, trim_tail,
+           transition, caption, on_beat, mix}], beat_grid, levels, engine }
+   → project.edl, status = edited
+
+render_task(final) → assemble.render → media.assemble_video (FFmpeg)
+   ├─ final only: regenerate hero scenes (dialogue + flagged) at premium tier
+   ├─ video: trim each clip, scale to 480p/1080p, burn caption, concat, (draft) watermark
+   ├─ audio: native (trim+level, concat) + narration (delay per scene, mix)
+   │         + music bed (pad/trim/level) → amix → limiter
+   └─ store draft|final asset (replaces prior of that tier); status → draft_rendered|rendered
+```
+
+- The render is **real FFmpeg in both modes** — the inputs (clips, narration,
+  music) are already real, so there's no mock branch.
+- **Hybrid mix realized:** narration at 0 dB delayed to each scene's offset, native
+  audio ducked to −16 dB (0 dB on dialogue, silenced if garble-muted), music bed at
+  −18 dB; a final `alimiter` prevents clipping.
+- **Editor signals:** clip durations, narration durations, the librosa beat grid,
+  and audio modes. Cuts are beat-snapped (`on_beat`). The live path sends sampled
+  frames to Claude vision; mock is a deterministic rules EDL from the same signals.
+- **v1 simplifications (documented):** transitions are recorded per cut but the
+  render uses hard cuts; ducking is static leveling (music −18 dB under narration).
+
 ## Hybrid audio strategy
 
 Deliberately mixed — implemented as designed (levels live in `pipeline/audio.py`
@@ -175,6 +202,7 @@ so the whole UI and pipeline run with **zero API spend**:
 | Quality frames | **Really extracted** from the clip via FFmpeg (4 JPEGs) |
 | Narration audio | Valid **silent** WAV of the right duration (ElevenLabs when live) |
 | Music bed | **Real** FFmpeg-synthesized beat track; **librosa** detects its grid for real |
+| Draft / final render | **Real** FFmpeg-assembled MP4 (480p / 1080p) with the full audio mix |
 | Quality report | Passes most clips; deterministically flags a subset |
 | EDL | Full decision list with a per-scene mix plan |
 

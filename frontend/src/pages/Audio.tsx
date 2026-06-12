@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, assetUrl, pollJob } from "../lib/api";
 import type { Asset, Project, Scene } from "../types";
 
@@ -8,6 +8,7 @@ type Track = { id: string; name: string; bpm: number; style: string; seconds: nu
 
 export default function Audio() {
   const { id } = useParams<{ id: string }>();
+  const nav = useNavigate();
   const [project, setProject] = useState<Project | null>(null);
   const [scenes, setScenes] = useState<Scene[]>([]);
   const [voices, setVoices] = useState<Voice[]>([]);
@@ -263,8 +264,12 @@ export default function Audio() {
             ? "Narration ready. Next: the AI editor assembles the Edit Decision List."
             : "Build narration for every narrated scene to continue."}
         </p>
-        <button className="btn-primary" disabled title="AI editor lands in Phase 5">
-          Open AI editor → (Phase 5)
+        <button
+          className="btn-primary"
+          disabled={!haveAllNarration && narratedScenes.length > 0}
+          onClick={() => id && nav(`/projects/${id}/editor`)}
+        >
+          Open AI editor →
         </button>
       </div>
     </div>

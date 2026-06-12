@@ -494,6 +494,158 @@ def _ensure_beat_grid(db, project, a_stage) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Phase 5: AI editor (EDL) + draft/final render
+# ---------------------------------------------------------------------------
+
+@celery_app.task(bind=True, name="storyforge.build_edl")
+def build_edl_task(self, project_id: str, job_id: str) -> dict:
+    """Assemble the Edit Decision List from the storyboard + real signals."""
+    from .pipeline import editor as e_stage
+
+    with session_scope() as db:
+        project = db.get(Project, project_id)
+        if not project:
+            _set_job(db, job_id, status=JobStatus.FAILED.value, error="project not found")
+            return {"ok": False}
+        _set_job(db, job_id, status=JobStatus.RUNNING.value, progress=0.2)
+
+        scenes = _edl_scene_inputs(project)
+        if not scenes:
+            _set_job(db, job_id, status=JobStatus.FAILED.value, error="no clips to edit yet")
+            return {"ok": False}
+        music = next((a for a in project.assets if a.kind == "music"), None)
+        beat_grid = (music.meta or {}).get("beat_grid") if music else None
+
+        edl = e_stage.build_edl(
+            project={"aspect_ratio": project.aspect_ratio, "idea": project.idea},
+            scenes=scenes, beat_grid=beat_grid, frames=None,
+        )
+        project.edl = edl
+        project.status = ProjectStatus.EDITED.value
+        db.add(project)
+        db.flush()
+        _set_job(db, job_id, status=JobStatus.SUCCESS.value, progress=1.0,
+                 result={"cuts": len(edl["cuts"]), "total_duration": edl["total_duration"]})
+        return {"ok": True, "cuts": len(edl["cuts"])}
+
+
+@celery_app.task(bind=True, name="storyforge.render")
+def render_task(self, project_id: str, job_id: str, final: bool = False) -> dict:
+    """Render the EDL. Draft = 480p watermarked; final regenerates hero scenes at
+    premium then renders 1080p with the full audio mix. Output stored in MinIO."""
+    from .models_config import Tier
+    from .pipeline import assemble as as_stage
+    from .pipeline import quality as q_stage
+    from .pipeline import video as v_stage
+    from .storage import get_bytes, public_url
+
+    with session_scope() as db:
+        project = db.get(Project, project_id)
+        if not project:
+            _set_job(db, job_id, status=JobStatus.FAILED.value, error="project not found")
+            return {"ok": False}
+        if not project.edl:
+            _set_job(db, job_id, status=JobStatus.FAILED.value, error="no EDL — run the editor first")
+            return {"ok": False}
+
+        _set_job(db, job_id, status=JobStatus.RUNNING.value, progress=0.05)
+        regenerated = 0
+
+        # Final: regenerate hero scenes (dialogue or quality-flagged) at premium.
+        if final:
+            char_sheet = (project.style_bible or {}).get("character_sheet")
+            ref_urls = [public_url(a.storage_key) for a in project.assets if a.kind == "reference"]
+            hero = [s for s in project.scenes
+                    if (s.audio_mode == "dialogue" or s.status == SceneStatus.FLAGGED.value)
+                    and s.keyframe_asset_id]
+            for s in hero:
+                try:
+                    _clip_for_scene(db, project, s, v_stage, q_stage, Tier.PREMIUM,
+                                    char_sheet, ref_urls, get_bytes, public_url)
+                    regenerated += 1
+                except Exception:  # noqa: BLE001
+                    log.exception("hero regen failed for scene %s", s.scene_number)
+                db.flush()
+            _set_job(db, job_id, progress=0.4)
+
+        scenes = _render_scene_inputs(db, project, get_bytes)
+        if not scenes:
+            _set_job(db, job_id, status=JobStatus.FAILED.value, error="no renderable clips")
+            return {"ok": False}
+        music = next((a for a in project.assets if a.kind == "music"), None)
+        music_bytes = get_bytes(music.storage_key) if music else None
+        _set_job(db, job_id, progress=0.6)
+
+        data = as_stage.render(draft=not final, aspect_ratio=project.aspect_ratio,
+                               scenes=scenes, music_bytes=music_bytes)
+
+        kind = "final" if final else "draft"
+        for a in [a for a in project.assets if a.kind == kind]:
+            project.assets.remove(a)  # replace previous render of this tier
+        db.flush()
+        asset = _store_asset(db, project.id, None, kind, data, "video/mp4",
+                             meta={"resolution": "1080p" if final else "480p",
+                                   "duration": project.edl.get("total_duration")})
+        project.status = (ProjectStatus.RENDERED if final else ProjectStatus.DRAFT_RENDERED).value
+        db.add(project)
+        db.flush()
+        _set_job(db, job_id, status=JobStatus.SUCCESS.value, progress=1.0,
+                 result={"asset_id": asset.id, "kind": kind, "regenerated": regenerated})
+        return {"ok": True, "asset_id": asset.id, "kind": kind}
+
+
+def _edl_scene_inputs(project: Project) -> list[dict]:
+    """Per-scene signals the editor needs (only scenes that have a clip)."""
+    out = []
+    for s in sorted(project.scenes, key=lambda s: s.scene_number):
+        if not s.clip_asset_id:
+            continue
+        native = next((a for a in project.assets
+                       if a.kind == "native_audio" and a.scene_id == s.id), None)
+        narr = next((a for a in project.assets
+                     if a.kind == "narration" and a.scene_id == s.id), None)
+        out.append({
+            "scene_number": s.scene_number,
+            "duration": s.duration_seconds,
+            "audio_mode": s.audio_mode,
+            "native_muted": bool((native.meta or {}).get("muted")) if native else False,
+            "narration_text": s.narration_text,
+            "narration_duration": (narr.meta or {}).get("duration") if narr else None,
+        })
+    return out
+
+
+def _render_scene_inputs(db, project: Project, get_bytes) -> list[dict]:
+    """Gather clip/narration bytes + per-scene mix from the EDL, in cut order."""
+    cuts = {c["scene_number"]: c for c in (project.edl or {}).get("cuts", [])}
+    scenes_by_num = {s.scene_number: s for s in project.scenes}
+    out = []
+    for num in sorted(cuts):
+        scene = scenes_by_num.get(num)
+        if not scene or not scene.clip_asset_id:
+            continue
+        clip = db.get(Asset, scene.clip_asset_id)
+        if not clip:
+            continue
+        cut = cuts[num]
+        mix = cut.get("mix", {})
+        narr = next((a for a in project.assets
+                     if a.kind == "narration" and a.scene_id == scene.id), None)
+        out.append({
+            "clip_bytes": get_bytes(clip.storage_key),
+            "narration_bytes": get_bytes(narr.storage_key) if narr else None,
+            "trim_head": cut.get("trim_head", 0.0),
+            "trim_tail": cut.get("trim_tail", 0.0),
+            "caption": cut.get("caption", ""),
+            "audio_mode": scene.audio_mode,
+            "narration_db": mix.get("narration_db"),
+            "native_db": mix.get("native_db"),
+            "duration": scene.duration_seconds,
+        })
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 

@@ -66,21 +66,29 @@ built before any real provider is wired.
 - Tests: 49 pytest + 74-check live smoke. (Also fixed a latent delete-orphan
   cascade bug on asset re-runs — see TESTING.md.)
 
-## 🔜 Phase 5 — AI editor + renders
+## ✅ Phase 5 — AI editor + renders (done)
 
-- Vision-equipped editor: Claude takes storyboard + frames + narration durations +
-  beat grid + audio modes → an Edit Decision List (order, trims, transitions,
-  captions, per-scene mix plan + ducking + narration pauses). EDL shown for approval.
-- FFmpeg executes the EDL: 480p watermarked draft (budget tiers) → on approval,
-  regenerate hero scenes on premium tiers and render final 1080p H.264/AAC with the
-  full audio mix. Both stored in MinIO.
-- Wires: `pipeline/editor.py`, `pipeline/assemble.py`.
+- AI editor builds an **Edit Decision List** from the storyboard + real signals
+  (clip durations, narration durations, beat grid, audio modes): per-cut in/out,
+  trims (cut mushy starts/ends), transition, caption, beat-snap, and a per-scene
+  mix plan. Shown for approval. Live path is Claude-vision over extracted frames.
+- **FFmpeg renders the EDL for real:** concat (trimmed) clips, burn captions, and
+  build the hybrid audio mix (narration delayed per scene + native ducked −16 dB +
+  music bed −18 dB, limiter). Draft = **480p watermarked**; final regenerates hero
+  scenes (dialogue + flagged) at premium then renders **1080p H.264/AAC**. Both in
+  MinIO. Project advances `audio → edited → draft_rendered → rendered`.
+- In-browser preview + **download/export** (Content-Disposition). Home shows a
+  "▶ watch" link for rendered projects.
+- Wires: `media.assemble_video` (FFmpeg filtergraph), `pipeline/editor.py`,
+  `pipeline/assemble.py`, `routers/render.py`, frontend `pages/Editor.tsx`.
+- Tests: 57 pytest + 89-check live smoke.
 
 ## 🔜 Phase 6 — History, cost dashboard, polish
 
-- In-browser player, download, project history page.
-- Cost dashboard (estimated vs actual).
-- General polish.
+- ✅ In-browser player + download/export; ✅ project history (Home) with "▶ watch".
+- Remaining: cost dashboard (estimated vs actual), crossfade transitions in the
+  render (v1 uses hard cuts; transitions are recorded in the EDL), sidechain
+  ducking (v1 uses static −18 dB music under narration), general polish.
 
 ---
 

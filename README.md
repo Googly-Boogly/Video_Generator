@@ -3,10 +3,11 @@
 Turn a single text prompt into a finished short film with audio, through an AI
 pipeline. Fully dockerized — one `docker compose up` brings up everything.
 
-> **Status:** Phases 1–4 complete — storyboard + review UI, FLUX.2 best-of-N
-> keyframes, video generation + quality gate (playable clips), and the audio build
-> (ElevenLabs narration + music bed + **librosa** beat grid + native-track mix).
-> Phases 5–6 scaffolded. See [docs/ROADMAP.md](docs/ROADMAP.md).
+> **Status:** Phases 1–5 complete — the **full pipeline runs end to end**:
+> storyboard + review UI → FLUX.2 best-of-N keyframes → video + quality gate →
+> audio build (narration + music bed + **librosa** beat grid) → AI editor (EDL) →
+> real FFmpeg **480p draft / 1080p final** render with preview + export. Phase 6
+> (cost dashboard, polish) remaining. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ---
 
@@ -54,7 +55,9 @@ spend**. Flip `MOCK_GENERATION=false` and supply keys to go live (see
 6. The **audio build** adds ElevenLabs narration in one locked voice, a music bed
    with a librosa **beat grid**, and a mix plan that ducks native audio under
    narration (dialogue scenes pause narration).
-7. (Phase 5) AI editor (Edit Decision List) → draft/final FFmpeg render.
+7. The **AI editor** assembles an Edit Decision List (trims, transitions, captions,
+   beat-snap, mix); **FFmpeg renders** a 480p watermarked draft, then a 1080p final
+   (hero shots regenerated at premium). Preview and **download** in the browser.
 
 ## Documentation
 
@@ -78,9 +81,9 @@ Anthropic SDK, ElevenLabs. Assembly: FFmpeg. Storage: MinIO (S3-compatible).
 
 ```bash
 # Self-contained unit + API integration tests (SQLite + eager Celery, no infra)
-docker compose exec api python -m pytest -q          # 49 passed
+docker compose exec api python -m pytest -q          # 57 passed
 
-# Live smoke test against the running stack (74 checks across every endpoint)
+# Live smoke test against the running stack (89 checks across every endpoint)
 python scripts/smoke_test.py
 
 # Frontend type-check + production build

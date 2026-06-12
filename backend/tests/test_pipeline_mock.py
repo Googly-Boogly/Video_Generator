@@ -174,6 +174,22 @@ def test_beat_grid_detects_tempo_with_librosa():
     assert len(grid["beats"]) > 5
 
 
+def test_build_edl_structure_and_beat_snap():
+    from app.pipeline import editor as e
+    scenes = [
+        {"scene_number": 1, "duration": 5, "audio_mode": "narrated", "narration_text": "hi", "native_muted": False},
+        {"scene_number": 2, "duration": 5, "audio_mode": "dialogue", "narration_text": "", "native_muted": False},
+    ]
+    edl = e.build_edl(project={"aspect_ratio": "16:9"}, scenes=scenes,
+                      beat_grid={"bpm": 120, "beats": [0.0, 0.5, 1.0, 1.5, 2.0]})
+    assert len(edl["cuts"]) == 2 and edl["total_duration"] > 0
+    assert edl["cuts"][0]["trim_head"] > 0 and edl["cuts"][0]["trim_tail"] > 0
+    assert edl["cuts"][0]["on_beat"] is not None
+    assert edl["cuts"][1]["mix"]["pause_narration_for_dialogue"] is True
+    assert edl["cuts"][1]["mix"]["narration_db"] is None
+    assert edl["levels"]["music_db"] == -18.0
+
+
 def test_mock_edl_pauses_narration_for_dialogue():
     scenes = [
         {"scene_number": 1, "duration_seconds": 5, "audio_mode": "narrated", "narration_text": "hi"},

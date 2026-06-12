@@ -9,6 +9,7 @@ import StoryboardReview from "./pages/StoryboardReview";
 import Keyframes from "./pages/Keyframes";
 import Clips from "./pages/Clips";
 import Audio from "./pages/Audio";
+import Editor from "./pages/Editor";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
@@ -21,6 +22,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           <Route path="projects/:id/keyframes" element={<Keyframes />} />
           <Route path="projects/:id/clips" element={<Clips />} />
           <Route path="projects/:id/audio" element={<Audio />} />
+          <Route path="projects/:id/editor" element={<Editor />} />
         </Route>
       </Routes>
     </BrowserRouter>

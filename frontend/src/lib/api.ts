@@ -132,7 +132,39 @@ export const api = {
     req<{ levels: Record<string, number>; scenes: { scene_number: number; audio_mode: string; mix: Record<string, unknown> }[] }>(
       `/api/projects/${pid}/mix-plan`
     ),
+
+  // --- Phase 5: editor + render ---
+  buildEdl: (pid: string) => req<Job>(`/api/projects/${pid}/edl`, { method: "POST" }),
+  getEdl: (pid: string) => req<Edl>(`/api/projects/${pid}/edl`),
+  render: (pid: string, final: boolean) =>
+    req<Job>(`/api/projects/${pid}/render?final=${final}`, { method: "POST" }),
+  listRenders: (pid: string) => req<Asset[]>(`/api/projects/${pid}/renders`),
 };
+
+export interface EdlCut {
+  scene_number: number;
+  in: number;
+  out: number;
+  trim_head: number;
+  trim_tail: number;
+  transition: string;
+  caption: string;
+  on_beat: number | null;
+  mix: {
+    narration_db: number | null;
+    music_db: number;
+    native_db: number | null;
+    duck_music_under_narration: boolean;
+    pause_narration_for_dialogue: boolean;
+  };
+}
+export interface Edl {
+  total_duration: number;
+  cuts: EdlCut[];
+  beat_grid: { bpm: number | null; beats: number } | null;
+  levels: Record<string, number>;
+  engine: string;
+}
 
 /** Poll a job until it reaches a terminal state. */
 export async function pollJob(

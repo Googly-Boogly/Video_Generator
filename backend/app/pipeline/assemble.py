@@ -1,18 +1,19 @@
-"""Stage 10: FFmpeg executes the EDL. Draft = 480p watermarked (budget tiers),
-final = 1080p H.264/AAC with the full audio mix. Both stored in MinIO.
+"""Stage 10: FFmpeg executes the EDL.
 
-Phase 5 wires the real FFmpeg graph. Phase 1 ships a stub render artifact.
+Draft = 480p watermarked; final = 1080p H.264/AAC with the full audio mix. Both
+stored in MinIO. Assembly is deterministic FFmpeg in either generation mode — the
+inputs (clips/narration/music) are already real, so there's no mock branch here.
 """
 from __future__ import annotations
 
-from ..config import settings
-from . import mock
+from .. import media
+from . import audio as a_stage
 
 
-def render(*, project: dict, edl: dict, draft: bool) -> bytes:
-    if settings.mock_generation:
-        tag = "draft-480p" if draft else "final-1080p"
-        return b"STORYFORGE_MOCK_RENDER:" + tag.encode() + b":" + str(
-            edl.get("total_duration", 0)
-        ).encode()
-    raise NotImplementedError("Real FFmpeg assembly lands in Phase 5.")
+def render(*, draft: bool, aspect_ratio: str, scenes: list[dict],
+           music_bytes: bytes | None) -> bytes:
+    """`scenes`: ordered render dicts (see media.assemble_video)."""
+    return media.assemble_video(
+        draft=draft, aspect_ratio=aspect_ratio, scenes=scenes,
+        music_bytes=music_bytes, music_db=a_stage.MUSIC_BED_DB,
+    )

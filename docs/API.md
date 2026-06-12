@@ -198,6 +198,36 @@ The per-scene narration/music/native levels the render applies:
 
 ---
 
+## AI editor & render (Phase 5)
+
+### `POST /api/projects/{id}/edl` → 202
+Build the Edit Decision List from the storyboard + clip/narration durations + beat
+grid. Returns a `Job`; project advances to `edited`. **400** if no clips yet.
+
+### `GET /api/projects/{id}/edl`
+The stored EDL:
+```jsonc
+{ "total_duration": 14.1, "engine": "mock",
+  "beat_grid": { "bpm": 99.4, "beats": 126 },
+  "levels": { "narration_db": 0.0, "native_db": -16.0, "music_db": -18.0 },
+  "cuts": [ { "scene_number": 1, "in": 0.0, "out": 4.7, "trim_head": 0.15,
+              "trim_tail": 0.15, "transition": "cut", "caption": "...",
+              "on_beat": 1.231, "mix": { ... } } ] }
+```
+**404** if not built yet.
+
+### `POST /api/projects/{id}/render?final=false|true` → 202
+Render the EDL with FFmpeg. `final=false` → 480p watermarked draft (status
+`draft_rendered`). `final=true` → regenerate hero scenes (dialogue + flagged) at
+premium, then 1080p (status `rendered`); result `{ asset_id, kind, regenerated }`.
+Replaces any previous render of the same tier. **400** if there's no EDL.
+
+### `GET /api/projects/{id}/renders`
+The `draft` / `final` render assets (`video/mp4`, `meta.resolution`), for the
+in-browser player.
+
+---
+
 ## Assets
 
 Generated media live in MinIO; the API proxies them so the browser needs no
@@ -211,9 +241,10 @@ Asset metadata:
   "url": "/api/assets/{id}/content" }
 ```
 
-### `GET /api/assets/{id}/content`
+### `GET /api/assets/{id}/content?download=false`
 The raw bytes with the right `Content-Type` (cacheable). Use directly in
-`<img src>` (prefix with the API host).
+`<img src>` / `<video src>` (prefix with the API host). `?download=1` adds a
+`Content-Disposition: attachment` header for export.
 
 ---
 

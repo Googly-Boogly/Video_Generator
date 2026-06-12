@@ -4,10 +4,10 @@ Three layers, all runnable with **zero API spend** (mock mode):
 
 | Layer | File | Infra needed | What it covers |
 | ----- | ---- | ------------ | -------------- |
-| Unit (pipeline) | `backend/tests/test_pipeline_mock.py` | FFmpeg + librosa (in the image) | Storyboard validation, prompt dialects, model/tier resolution, best-of-N ranking, playable-clip encode + demux + frame extract, **voices/mix levels, narration synth, librosa beat grid**, EDL mix plan |
-| Unit (media) | `backend/tests/test_media.py` | FFmpeg (in the image) | `media.py` directly: `dims_for`, valid-MP4 encode, h264+aac streams & duration, demux, frame extract, **music-bed synth + duration**, error on bad input |
-| Integration (API) | `backend/tests/test_api_integration.py` | none (SQLite + eager Celery + in-memory storage shim) | Every HTTP endpoint incl. keyframes/assets/video+quality/**audio**, per-scene failure isolation, **full-regenerate + rebuild (no cascade)**, validation/error paths, async job lifecycle |
-| Smoke (live) | `scripts/smoke_test.py` | running stack | 74 checks against the real API + worker + Postgres + Redis + **MinIO** |
+| Unit (pipeline) | `backend/tests/test_pipeline_mock.py` | FFmpeg + librosa (in the image) | Storyboard validation, prompt dialects, model/tier resolution, best-of-N ranking, clip encode + demux + frame extract, voices/mix levels, narration synth, librosa beat grid, **EDL structure + beat-snap** |
+| Unit (media) | `backend/tests/test_media.py` | FFmpeg (in the image) | `media.py` directly: encode, demux, frame extract, music-bed synth, **`assemble_video` draft 480p / final 1080p with audio** |
+| Integration (API) | `backend/tests/test_api_integration.py` | none (SQLite + eager Celery + in-memory storage shim) | Every HTTP endpoint incl. keyframes/video/audio/**EDL+render**, failure isolation, rebuild/full-regenerate (no cascade), **hero regen on final, render replace**, error paths |
+| Smoke (live) | `scripts/smoke_test.py` | running stack | 89 checks against the real API + worker + Postgres + Redis + **MinIO** |
 
 > The integration harness (`conftest.py`) also patches the storage helpers with an
 > in-memory shim, so keyframe/asset tests need no MinIO.
@@ -26,7 +26,7 @@ docker compose exec api python -m pytest -q
 cd backend && MOCK_GENERATION=true python -m pytest -q
 ```
 
-Expected: **49 passed** (23 unit + 26 integration).
+Expected: **57 passed** (26 unit + 31 integration).
 
 > The media/audio/Phase 3 tests invoke real FFmpeg + librosa (present in the
 > backend image), so run them in the container — encoding/demux/frame-extraction
@@ -49,10 +49,11 @@ BASE=http://localhost:8800 python scripts/smoke_test.py
 It creates a project, generates a storyboard, edits/reorders/adds/deletes scenes,
 revises conversationally, checks tier-based costs and error paths, then deletes the
 project. It also runs Phase 2 (keyframes best-of-N, override, regenerate), Phase 3
-(clip generation, playable-mp4, native audio, quality frames, regenerate), and
-Phase 4 (voices/library, set voice, library bed + **librosa** beat grid, narration
-build + **rebuild without duplication**, mix plan). Prints `PASS`/`FAIL` per check
-and exits non-zero on any failure. Expected: **74 passed, 0 failed**.
+(clip generation, playable-mp4, native audio, quality frames, regenerate),
+Phase 4 (voices/library, library bed + **librosa** beat grid, narration build +
+rebuild without duplication, mix plan), and Phase 5 (build EDL, **render draft 480p
++ final 1080p**, status transitions, download header). Prints `PASS`/`FAIL` per
+check and exits non-zero on any failure. Expected: **89 passed, 0 failed**.
 
 ## Frontend
 
@@ -86,6 +87,10 @@ module on request in dev, surfacing import/parse errors immediately.
 - Audio: locked-voice narration per narrated scene (dialogue skipped), real
   **librosa** beat grid on the music bed (~128 bpm recovered), music upload/remove,
   the mix plan, and **rebuild without duplicating narration**.
+- Editor/render: EDL with trims/beat-snap/mix; FFmpeg assembles a real **480p draft
+  and 1080p final** (ffprobe-verified resolution + audio); status transitions
+  `edited → draft_rendered → rendered`; hero-scene regen on final; render replaces
+  the prior of its tier; export download header.
 - Frontend: every TS/TSX module transforms cleanly through Vite + `npm run build`
   type-checks; UI served at `:5273`.
 
