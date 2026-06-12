@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 from .database import init_db
 from .routers import assets as assets_router
+from .routers import audio as audio_router
 from .routers import config as config_router
 from .routers import jobs as jobs_router
 from .routers import keyframes as keyframes_router
@@ -54,6 +55,7 @@ app.include_router(projects_router.router)
 app.include_router(storyboard_router.router)
 app.include_router(keyframes_router.router)
 app.include_router(video_router.router)
+app.include_router(audio_router.router)
 app.include_router(assets_router.router)
 app.include_router(jobs_router.router)
 

@@ -19,7 +19,7 @@ style_bible → storyboard → keyframes → video → quality → audio → edi
 | 5 | Keyframes (best-of-N) | `keyframes.py` | ✅ 2 | 3× FLUX.2 variants/scene with refs attached + Claude-vision ranked winner; user can override |
 | 6 | Video generation | `video.py` | ✅ 3 | One clip/scene via the routed model (tier-aware) + demuxed native audio |
 | 7 | Quality gate | `quality.py` | ✅ 3 | 4 frames/clip + Claude-vision artifact/identity flags + garbled-speech auto-mute |
-| 8 | Audio build | `audio.py` | 🔜 4 | ElevenLabs narration, music bed + beat grid, leveled native tracks |
+| 8 | Audio build | `audio.py` | ✅ 4 | ElevenLabs narration (locked voice), music bed + librosa beat grid, native-track mix plan |
 | 9 | AI editor | `editor.py` | 🔜 5 | Edit Decision List (order, trims, transitions, captions, mix plan) |
 | 10 | Draft → final render | `assemble.py` | 🔜 5 | 480p watermarked draft, then 1080p H.264/AAC final |
 | 11 | Preview & export | (API + UI) | 🔜 6 | In-browser player, download, history |
@@ -107,6 +107,31 @@ generate_video_task(project_id, tier="draft", [scene_id])
   (used for flagged clips); a fresh clip + frames replace the old ones.
 - Clips and frames are served via the asset proxy and play directly in the UI.
 
+## Audio build (Phase 4)
+
+```
+build_audio_task(project_id, [scene_id])
+  ├─ ensure the music bed's beat grid (librosa) if a bed is chosen
+  └─ per narrated scene (dialogue scenes skipped — native audio carries speech):
+        ElevenLabs TTS with Project.voice_id  ── mock: silent WAV sized to text
+        → narration asset (kind=narration) {voice_id, duration, chars}
+  → project.status = audio
+```
+
+- **Voice is locked per project** (`Project.voice_id`, default `voice_aria`). Set
+  via `POST …/voice`. Narration carries the words; native model audio is never the
+  voice (identity can't persist across generation calls).
+- **Music bed** is one continuous track: `POST …/music` (upload) or
+  `POST …/music/library` (a built-in bed synthesized by FFmpeg). On either, a
+  **librosa beat grid** `{bpm, beats[], duration, engine}` is detected on the real
+  audio and stored in the music asset's `meta` (falls back to a synthetic grid only
+  if librosa/codec is unavailable).
+- **Mix plan** (`GET …/mix-plan`) renders the per-scene levels the editor/render
+  will apply: narration 0 dB, native −16 dB (ducked, or muted if garble-flagged),
+  music −18 dB; dialogue scenes set `narration_db=None` + `pause_narration_for_dialogue`.
+- Narration is one asset per narrated scene; rebuilding replaces (never duplicates)
+  them.
+
 ## Hybrid audio strategy
 
 Deliberately mixed — implemented as designed (levels live in `pipeline/audio.py`
@@ -148,7 +173,8 @@ so the whole UI and pipeline run with **zero API spend**:
 | Clip | **Real, playable** H.264/AAC MP4 — FFmpeg-encoded from the winning keyframe |
 | Native audio | Demuxed from the clip (silent track in mock) |
 | Quality frames | **Really extracted** from the clip via FFmpeg (4 JPEGs) |
-| Narration audio | Valid **silent** WAV of the right duration |
+| Narration audio | Valid **silent** WAV of the right duration (ElevenLabs when live) |
+| Music bed | **Real** FFmpeg-synthesized beat track; **librosa** detects its grid for real |
 | Quality report | Passes most clips; deterministically flags a subset |
 | EDL | Full decision list with a per-scene mix plan |
 

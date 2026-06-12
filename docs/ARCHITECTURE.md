@@ -99,6 +99,31 @@ persisted (assets, scene rows) is never discarded.
 
 **Job status:** `queued → running → success | failed`.
 
+### Per-scene failure isolation (a guarantee)
+
+Fan-out tasks (keyframes, video) loop over scenes and wrap each scene's work in
+its own `try/except`. A failure marks just that scene `failed` (with `scene.error`)
+and continues; the job still reports `success` with a `{scenes_done, scenes_failed,
+scenes_flagged}` summary, and the project still advances as long as ≥1 scene
+produced output. Covered by `test_failed_scene_is_isolated` — a scene lacking a
+winning keyframe fails alone while the rest get clips. Never let one provider error
+abort the whole batch.
+
+### Media layer (`media.py`, FFmpeg)
+
+FFmpeg (bundled in the backend image) is the local media engine, used by the video
+stage and quality gate — and it runs in **mock mode too** (mock = don't pay an AI
+model, not skip local work):
+
+| Helper | Does |
+| ------ | ---- |
+| `image_to_clip` | Encode a still keyframe → playable H.264/AAC MP4 (mock clip) |
+| `demux_audio` | Pull a clip's native audio track into its own asset (m4a/AAC) |
+| `extract_frames` | Grab N evenly spaced JPEG frames for the quality gate |
+| `dims_for` / `_probe_duration` | 480p-class dims per aspect ratio; ffprobe duration |
+
+Failures raise `FFmpegError`. Tested directly in `tests/test_media.py`.
+
 ## Module map (`backend/app/`)
 
 | Module | Responsibility |
@@ -112,12 +137,13 @@ persisted (assets, scene rows) is never discarded.
 | `cost.py` | Cost estimator (per step + full project) |
 | `llm.py` | Anthropic wrapper: `complete_json`, `rank_images` (vision) |
 | `storage.py` | MinIO/S3 helper (`put_bytes`, `get_bytes`, `public_url`) |
-| `media.py` | FFmpeg helpers: encode clip, demux native audio, extract frames |
-| `providers/` | External provider calls (`fal_provider.generate_image` / `generate_video`) behind the mock flag |
+| `asset_store.py` | Shared `store_asset()` — put bytes in MinIO + create the `Asset` row |
+| `media.py` | FFmpeg: encode clip, demux native audio, extract frames, synth music bed |
+| `providers/` | `fal_provider` (image/video), `elevenlabs_provider` (TTS/voices) — behind the mock flag |
 | `celery_app.py` | Celery app + config |
 | `tasks.py` | Celery tasks (the only place generation runs) |
 | `pipeline/` | One module per stage — independently testable |
-| `routers/` | FastAPI routers: `config`, `projects`, `storyboard`, `keyframes`, `video`, `assets`, `jobs` |
+| `routers/` | FastAPI routers: `config`, `projects`, `storyboard`, `keyframes`, `video`, `audio`, `assets`, `jobs` |
 | `main.py` | App assembly, CORS, lifespan (DB + bucket init) |
 
 See [PIPELINE.md](PIPELINE.md) for the pipeline modules and [API.md](API.md) for

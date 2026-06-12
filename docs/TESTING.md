@@ -4,9 +4,10 @@ Three layers, all runnable with **zero API spend** (mock mode):
 
 | Layer | File | Infra needed | What it covers |
 | ----- | ---- | ------------ | -------------- |
-| Unit (pipeline) | `backend/tests/test_pipeline_mock.py` | FFmpeg (in the image) | Storyboard validation, prompt-translator dialects, model/tier resolution, reference images + best-of-N ranking, **playable-clip encode + demux + frame extract**, EDL mix plan |
-| Integration (API) | `backend/tests/test_api_integration.py` | none (SQLite + eager Celery + in-memory storage shim) | Every HTTP endpoint incl. keyframes/assets/**video+quality**, validation/error paths, async job lifecycle |
-| Smoke (live) | `scripts/smoke_test.py` | running stack | 59 checks against the real API + worker + Postgres + Redis + **MinIO** |
+| Unit (pipeline) | `backend/tests/test_pipeline_mock.py` | FFmpeg + librosa (in the image) | Storyboard validation, prompt dialects, model/tier resolution, best-of-N ranking, playable-clip encode + demux + frame extract, **voices/mix levels, narration synth, librosa beat grid**, EDL mix plan |
+| Unit (media) | `backend/tests/test_media.py` | FFmpeg (in the image) | `media.py` directly: `dims_for`, valid-MP4 encode, h264+aac streams & duration, demux, frame extract, **music-bed synth + duration**, error on bad input |
+| Integration (API) | `backend/tests/test_api_integration.py` | none (SQLite + eager Celery + in-memory storage shim) | Every HTTP endpoint incl. keyframes/assets/video+quality/**audio**, per-scene failure isolation, **full-regenerate + rebuild (no cascade)**, validation/error paths, async job lifecycle |
+| Smoke (live) | `scripts/smoke_test.py` | running stack | 74 checks against the real API + worker + Postgres + Redis + **MinIO** |
 
 > The integration harness (`conftest.py`) also patches the storage helpers with an
 > in-memory shim, so keyframe/asset tests need no MinIO.
@@ -25,11 +26,12 @@ docker compose exec api python -m pytest -q
 cd backend && MOCK_GENERATION=true python -m pytest -q
 ```
 
-Expected: **29 passed** (12 unit + 17 integration).
+Expected: **49 passed** (23 unit + 26 integration).
 
-> Phase 3 tests invoke real FFmpeg (present in the backend image), so run them in
-> the container — encoding/demux/frame-extraction happen for real, just with mock
-> AI output.
+> The media/audio/Phase 3 tests invoke real FFmpeg + librosa (present in the
+> backend image), so run them in the container — encoding/demux/frame-extraction
+> and beat detection happen for real, just with mock AI output. `pytest` is in
+> `requirements.txt`; a freshly built image already has it.
 
 > Host run needs the backend deps installed (`pip install -r backend/requirements.txt`),
 > or at minimum `fastapi sqlalchemy celery httpx sse-starlette pydantic
@@ -46,11 +48,11 @@ BASE=http://localhost:8800 python scripts/smoke_test.py
 
 It creates a project, generates a storyboard, edits/reorders/adds/deletes scenes,
 revises conversationally, checks tier-based costs and error paths, then deletes the
-project. It also runs the Phase 2 keyframe flow (reference images, best-of-N,
-asset content, winner override, single-scene regenerate) and the Phase 3 video
-flow (clip generation, playable-mp4 check, native audio, quality-gate frames,
-single-scene regenerate). Prints `PASS`/`FAIL` per check and exits non-zero on any
-failure. Expected: **59 passed, 0 failed**.
+project. It also runs Phase 2 (keyframes best-of-N, override, regenerate), Phase 3
+(clip generation, playable-mp4, native audio, quality frames, regenerate), and
+Phase 4 (voices/library, set voice, library bed + **librosa** beat grid, narration
+build + **rebuild without duplication**, mix plan). Prints `PASS`/`FAIL` per check
+and exits non-zero on any failure. Expected: **74 passed, 0 failed**.
 
 ## Frontend
 
@@ -72,8 +74,20 @@ module on request in dev, surfacing import/parse errors immediately.
   and closes on terminal state.
 - Routing/cost: dialogue scenes route to a lip-sync model; draft cost < premium
   cost; explicit per-scene overrides win.
-- Frontend: every TS/TSX module transforms cleanly through Vite; UI served at
-  `:5273`.
+- Keyframes: 3 variants/scene, exactly one winner, winner override, regenerate.
+- Video: real playable H.264/AAC clips, native-audio demux (default unmuted),
+  4 quality-gate frames, single-scene regenerate, premium tier → premium model.
+- **Failure isolation:** a scene with no winning keyframe fails alone — it is
+  marked `failed` with a reason, while every other scene still gets a clip and the
+  project advances to `clips` (`test_failed_scene_is_isolated`).
+- Media layer: `media.py` produces valid MP4s (h264+aac, correct duration),
+  demuxes audio, extracts the right number of JPEG frames, synthesizes music beds,
+  and raises `FFmpegError` on bad input (`test_media.py`).
+- Audio: locked-voice narration per narrated scene (dialogue skipped), real
+  **librosa** beat grid on the music bed (~128 bpm recovered), music upload/remove,
+  the mix plan, and **rebuild without duplicating narration**.
+- Frontend: every TS/TSX module transforms cleanly through Vite + `npm run build`
+  type-checks; UI served at `:5273`.
 
 ## Regression notes
 
@@ -91,6 +105,13 @@ Two bugs were caught by these tests and fixed:
    fine but `npm run build` (tsc) failed on `import.meta.env`. Fixed by adding
    `frontend/src/vite-env.d.ts`. Caught by running the production build, which is
    now part of the frontend check.
+4. **Delete-orphan cascade on asset re-runs** (Phase 4) — clearing prior assets
+   with `db.delete()` while they were still in the loaded `project.assets`
+   collection tripped SQLAlchemy's delete-orphan cascade — but only on the *rebuild*
+   path (when assets already exist), which the first-run/single-scene tests didn't
+   exercise. It also affected keyframes/video full-regenerate. Fixed by removing via
+   the relationship (`project.assets.remove(a)`). Guarded by
+   `test_audio_build_narration_and_rebuild` and `test_full_regenerate_keyframes_no_cascade`.
 
 ## Adding tests
 

@@ -168,6 +168,11 @@ export default function StoryboardReview() {
               Clips
             </Link>
           )}
+          {["audio", "edited", "draft_rendered", "rendered"].includes(project.status) && (
+            <Link to={`/projects/${project.id}/audio`} className="btn-ghost">
+              Audio
+            </Link>
+          )}
           <button className="btn-ghost" onClick={regenerateAll} disabled={generating}>
             ↻ Regenerate storyboard
           </button>

@@ -272,6 +272,41 @@ def test_single_scene_video_regenerate(client):
     assert after["clip_asset_id"] and after["clip_asset_id"] != before
 
 
+def test_failed_scene_is_isolated(client):
+    """A scene with no winning keyframe fails alone — the project survives and
+    every other scene still gets a clip."""
+    p = _ready_project(client)
+    pid = p["id"]
+    # Add a brand-new scene AFTER keyframes; it has no keyframe winner.
+    bad = client.post(f"/api/projects/{pid}/scenes", json={"after_scene_number": 1}).json()
+
+    job = _video(client, pid)
+    assert job["result"]["scenes_failed"] >= 1
+    assert job["result"]["scenes_done"] >= 1
+
+    bad_scene = client.get(f"/api/projects/{pid}/scenes/{bad['id']}").json()
+    assert bad_scene["status"] == "failed"
+    assert bad_scene["error"] and "keyframe" in bad_scene["error"].lower()
+    assert bad_scene["clip_asset_id"] is None
+
+    # The project still advanced and the other scenes have clips.
+    proj = client.get(f"/api/projects/{pid}").json()
+    assert proj["status"] == "clips"
+    good = [s for s in proj["scenes"] if s["id"] != bad["id"]]
+    assert good and all(s["clip_asset_id"] for s in good)
+
+
+def test_native_audio_asset_defaults_unmuted(client):
+    p = _ready_project(client)
+    pid = p["id"]
+    _video(client, pid)
+    s = client.get(f"/api/projects/{pid}/scenes").json()[0]
+    native = client.get(f"/api/assets/{s['native_audio_asset_id']}").json()
+    assert native["kind"] == "native_audio"
+    assert native["content_type"] == "audio/mp4"
+    assert native["meta"]["muted"] is False
+
+
 def test_premium_tier_routes_premium_model(client):
     p = _ready_project(client)
     pid = p["id"]
@@ -280,3 +315,105 @@ def test_premium_tier_routes_premium_model(client):
     clip_id = client.get(f"/api/projects/{pid}/scenes/{sid}").json()["clip_asset_id"]
     clip = client.get(f"/api/assets/{clip_id}").json()
     assert clip["meta"]["model_id"] == "kling-3-pro"  # premium narrated default
+
+
+def test_full_regenerate_keyframes_no_cascade(client):
+    """Regression: a full re-run with pre-existing assets must not trip the
+    delete-orphan cascade (the bug fixed alongside Phase 4)."""
+    p = _make_project(client, target_length=15)
+    _storyboard(client, p["id"])
+    pid = p["id"]
+    _keyframes(client, pid)
+    job = _keyframes(client, pid)  # second full run over existing keyframes
+    assert job["result"]["scenes_done"] >= 1
+    # variants not duplicated
+    sid = client.get(f"/api/projects/{pid}/scenes").json()[0]["id"]
+    assert len(client.get(f"/api/projects/{pid}/scenes/{sid}/keyframes").json()) == 3
+
+
+# --- Phase 4: audio build ---------------------------------------------------
+
+def _audio(client, pid):
+    r = client.post(f"/api/projects/{pid}/audio")
+    assert r.status_code == 202, r.text
+    final = client.get(f"/api/jobs/{r.json()['id']}").json()
+    assert final["status"] == "success", final
+    return final
+
+
+def test_audio_catalogs(client):
+    v = client.get("/api/voices").json()
+    assert any(x["voice_id"] == v["default"] for x in v["voices"])
+    lib = client.get("/api/music/library").json()
+    assert len(lib["tracks"]) >= 3
+
+
+def test_set_voice(client):
+    p = _make_project(client)
+    pid = p["id"]
+    assert client.post(f"/api/projects/{pid}/voice", json={"voice_id": "bogus"}).status_code == 400
+    r = client.post(f"/api/projects/{pid}/voice", json={"voice_id": "voice_atlas"})
+    assert r.json()["voice_id"] == "voice_atlas"
+
+
+def test_music_library_pick_runs_librosa_beat_grid(client):
+    p = _make_project(client, target_length=15)
+    _storyboard(client, p["id"])
+    pid = p["id"]
+    r = client.post(f"/api/projects/{pid}/music/library", json={"track_id": "upbeat-128"})
+    assert r.status_code == 201, r.text
+    grid = r.json()["meta"]["beat_grid"]
+    assert grid["engine"] == "librosa" and grid["bpm"] > 0 and len(grid["beats"]) > 5
+    assert client.get(f"/api/projects/{pid}/music").json()["id"] == r.json()["id"]
+
+
+def test_audio_build_narration_and_rebuild(client):
+    p = _make_project(client, target_length=15)
+    _storyboard(client, p["id"])
+    pid = p["id"]
+    job = _audio(client, pid)
+    assert job["result"]["narrated"] >= 1
+
+    narr = client.get(f"/api/projects/{pid}/narration").json()
+    assert len(narr) == job["result"]["narrated"]
+    assert narr[0]["meta"]["voice_id"] and narr[0]["meta"]["duration"] > 0
+    assert client.get(narr[0]["url"]).content[:4] == b"RIFF"  # playable WAV
+    assert client.get(f"/api/projects/{pid}").json()["status"] == "audio"
+
+    # REBUILD — the cascade-bug regression. Must succeed and not duplicate.
+    job2 = _audio(client, pid)
+    assert job2["result"]["narrated"] >= 1
+    assert len(client.get(f"/api/projects/{pid}/narration").json()) == len(narr)
+
+
+def test_dialogue_scene_skips_narration(client):
+    p = _make_project(client, target_length=15)
+    _storyboard(client, p["id"])
+    pid = p["id"]
+    sid = client.get(f"/api/projects/{pid}/scenes").json()[0]["id"]
+    client.patch(f"/api/projects/{pid}/scenes/{sid}",
+                 json={"audio_mode": "dialogue", "dialogue_text": "We found it."})
+    job = _audio(client, pid)
+    assert job["result"]["skipped"] >= 1
+    narr = client.get(f"/api/projects/{pid}/narration").json()
+    assert all(a["scene_id"] != sid for a in narr)  # no narration for the dialogue scene
+
+    mp = client.get(f"/api/projects/{pid}/mix-plan").json()
+    s = next(x for x in mp["scenes"] if x["scene_number"] == 1)
+    assert s["mix"]["pause_narration_for_dialogue"] is True
+    assert s["mix"]["narration_db"] is None
+
+
+def test_music_upload_and_remove(client):
+    from app.pipeline import mock
+    p = _make_project(client, target_length=15)
+    _storyboard(client, p["id"])
+    pid = p["id"]
+    wav = mock.silent_wav(2.0)
+    r = client.post(f"/api/projects/{pid}/music",
+                    files={"file": ("bed.wav", wav, "audio/wav")})
+    assert r.status_code == 201
+    assert "beat_grid" in r.json()["meta"]
+    assert client.get(f"/api/projects/{pid}/music").json() is not None
+    assert client.delete(f"/api/projects/{pid}/music").status_code == 204
+    assert client.get(f"/api/projects/{pid}/music").json() is None

@@ -111,3 +111,40 @@ def _probe_duration(path: Path) -> float | None:
         return float(proc.stdout.decode().strip())
     except (ValueError, AttributeError):
         return None
+
+
+def duration_of(*, audio_or_video_bytes: bytes, suffix: str = ".mp4") -> float:
+    """Probe the duration (seconds) of an audio/video payload."""
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d) / f"m{suffix}"
+        p.write_bytes(audio_or_video_bytes)
+        return _probe_duration(p) or 0.0
+
+
+def synth_music_bed(*, bpm: int, seconds: float, style: str = "ambient") -> bytes:
+    """Synthesize a placeholder music bed with a clear beat at `bpm`.
+
+    A low sustained tone plus a short click on every beat — crude, but it gives
+    librosa real onsets to detect, so the beat-grid path is exercised without
+    shipping copyrighted audio. Returns MP3 bytes.
+    """
+    beat = 60.0 / max(bpm, 1)
+    base_freq = {"ambient": 110, "cinematic": 82, "upbeat": 147}.get(style, 110)
+    with tempfile.TemporaryDirectory() as d:
+        out = Path(d) / "bed.mp3"
+        # Sustained pad + percussive click every `beat` seconds.
+        pad = f"sine=frequency={base_freq}:duration={seconds:.2f}"
+        click = (
+            f"sine=frequency=1200:duration={seconds:.2f},"
+            f"tremolo=f={1/beat:.4f}:d=1,"
+            f"volume='if(lt(mod(t,{beat:.4f}),0.04),1.0,0.0)':eval=frame"
+        )
+        _run([
+            "ffmpeg", "-y", "-loglevel", "error",
+            "-f", "lavfi", "-i", pad,
+            "-f", "lavfi", "-i", click,
+            "-filter_complex", "[0:a]volume=0.25[a0];[1:a]volume=0.8[a1];[a0][a1]amix=inputs=2:normalize=0[a]",
+            "-map", "[a]", "-c:a", "libmp3lame", "-b:a", "128k",
+            str(out),
+        ])
+        return out.read_bytes()

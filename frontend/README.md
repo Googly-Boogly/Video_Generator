@@ -20,6 +20,7 @@ src/
     StoryboardReview.tsx   the review UI (style bible, scene cards, revision, cost)
     Keyframes.tsx          best-of-N keyframe selection (references + variants)
     Clips.tsx              video clips, quality flags, frames, regenerate
+    Audio.tsx              voice, music bed + beat grid, narration, mix plan
   components/
     SceneCard.tsx          one editable scene (fields, model picker, audio toggle…)
 ```

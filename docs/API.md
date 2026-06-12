@@ -156,6 +156,48 @@ After a clip job, each scene carries:
 
 ---
 
+## Audio build (Phase 4)
+
+### Catalogs
+- `GET /api/voices` → `{ voices: [{voice_id, name, labels}], default }`
+- `GET /api/music/library` → `{ tracks: [{id, name, bpm, style, seconds}] }`
+
+### `POST /api/projects/{id}/voice`
+`{ "voice_id": "voice_atlas" }` — lock the project's narration voice. **400** if
+unknown.
+
+### Music bed
+- `GET /api/projects/{id}/music` → the music asset (or `null`). `meta.beat_grid =
+  { bpm, beats[], duration, engine }`.
+- `POST /api/projects/{id}/music` → 201 — **multipart** upload (`file`); beat grid
+  detected immediately (librosa). Replaces any existing bed.
+- `POST /api/projects/{id}/music/library` → 201 — `{ "track_id": "upbeat-128" }`
+  picks a built-in bed (FFmpeg-synthesized, then beat-detected).
+- `DELETE /api/projects/{id}/music` → 204.
+
+### `POST /api/projects/{id}/audio` → 202
+Synthesize narration for every narrated scene with the locked voice + ensure the
+beat grid. Returns a `Job`; result `{ narrated, skipped, failed }`. On success the
+project advances to `audio`. **400** if there are no scenes.
+
+### `POST /api/projects/{id}/scenes/{scene_id}/narration` → 202
+Regenerate one scene's narration. Returns a `Job`.
+
+### `GET /api/projects/{id}/narration`
+Narration assets (`kind: "narration"`); `meta = { voice_id, duration, chars }`.
+
+### `GET /api/projects/{id}/mix-plan`
+The per-scene narration/music/native levels the render applies:
+```jsonc
+{ "levels": { "narration_db": 0.0, "native_db": -16.0, "music_db": -18.0 },
+  "scenes": [ { "scene_number": 1, "audio_mode": "narrated",
+                "mix": { "narration_db": 0.0, "music_db": -18.0, "native_db": -16.0,
+                         "duck_music_under_narration": true,
+                         "pause_narration_for_dialogue": false } } ] }
+```
+
+---
+
 ## Assets
 
 Generated media live in MinIO; the API proxies them so the browser needs no

@@ -95,6 +95,43 @@ export const api = {
     req<Job>(`/api/projects/${pid}/scenes/${sid}/video?tier=${tier}`, { method: "POST" }),
   listSceneFrames: (pid: string, sid: string) =>
     req<Asset[]>(`/api/projects/${pid}/scenes/${sid}/frames`),
+
+  // --- Phase 4: audio ---
+  listVoices: () =>
+    req<{ voices: { voice_id: string; name: string; labels: Record<string, string> }[]; default: string }>(
+      "/api/voices"
+    ),
+  musicLibrary: () =>
+    req<{ tracks: { id: string; name: string; bpm: number; style: string; seconds: number }[] }>(
+      "/api/music/library"
+    ),
+  setVoice: (pid: string, voice_id: string) =>
+    req<{ voice_id: string }>(`/api/projects/${pid}/voice`, {
+      method: "POST",
+      body: JSON.stringify({ voice_id }),
+    }),
+  getMusic: (pid: string) => req<Asset | null>(`/api/projects/${pid}/music`),
+  pickLibraryMusic: (pid: string, track_id: string) =>
+    req<Asset>(`/api/projects/${pid}/music/library`, {
+      method: "POST",
+      body: JSON.stringify({ track_id }),
+    }),
+  removeMusic: (pid: string) => req<void>(`/api/projects/${pid}/music`, { method: "DELETE" }),
+  uploadMusic: async (pid: string, file: File): Promise<Asset> => {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(`${BASE}/api/projects/${pid}/music`, { method: "POST", body: form });
+    if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+    return res.json();
+  },
+  buildAudio: (pid: string) => req<Job>(`/api/projects/${pid}/audio`, { method: "POST" }),
+  regenerateNarration: (pid: string, sid: string) =>
+    req<Job>(`/api/projects/${pid}/scenes/${sid}/narration`, { method: "POST" }),
+  listNarration: (pid: string) => req<Asset[]>(`/api/projects/${pid}/narration`),
+  mixPlan: (pid: string) =>
+    req<{ levels: Record<string, number>; scenes: { scene_number: number; audio_mode: string; mix: Record<string, unknown> }[] }>(
+      `/api/projects/${pid}/mix-plan`
+    ),
 };
 
 /** Poll a job until it reaches a terminal state. */

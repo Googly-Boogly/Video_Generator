@@ -146,6 +146,34 @@ def test_dialogue_scene_routes_to_veo():
     assert v_stage.resolve_model(scene=scene, tier=Tier.PREMIUM) == "veo-31"
 
 
+def test_audio_voices_and_mix_levels():
+    from app.pipeline import audio as a
+    voices = a.list_voices()
+    assert any(v["voice_id"] == a.DEFAULT_VOICE_ID for v in voices)
+    narrated = a.mix_plan(audio_mode="narrated", native_muted=False)
+    assert narrated["narration_db"] == 0.0 and narrated["native_db"] == a.NATIVE_DUCK_DB
+    assert narrated["pause_narration_for_dialogue"] is False
+    dlg = a.mix_plan(audio_mode="dialogue", native_muted=False)
+    assert dlg["narration_db"] is None and dlg["pause_narration_for_dialogue"] is True
+    assert a.mix_plan(audio_mode="narrated", native_muted=True)["native_db"] is None
+
+
+def test_narration_synth_is_silent_wav_in_mock():
+    from app.pipeline import audio as a
+    data, ct, dur = a.synth_narration(text="hello there friend " * 3, voice_id="voice_aria")
+    assert ct == "audio/wav" and data[:4] == b"RIFF" and dur > 0
+
+
+def test_beat_grid_detects_tempo_with_librosa():
+    from app.pipeline import audio as a
+    from app import media
+    bed = media.synth_music_bed(bpm=128, seconds=10, style="upbeat")
+    grid = a.beat_grid(audio_bytes=bed, suffix=".mp3", bpm_hint=128)
+    assert grid["engine"] == "librosa"
+    assert 100 <= grid["bpm"] <= 150          # recovers roughly the 128-bpm bed
+    assert len(grid["beats"]) > 5
+
+
 def test_mock_edl_pauses_narration_for_dialogue():
     scenes = [
         {"scene_number": 1, "duration_seconds": 5, "audio_mode": "narrated", "narration_text": "hi"},

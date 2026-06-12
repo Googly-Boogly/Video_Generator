@@ -3,10 +3,10 @@
 Turn a single text prompt into a finished short film with audio, through an AI
 pipeline. Fully dockerized — one `docker compose up` brings up everything.
 
-> **Status:** Phases 1–3 complete — storyboard + review UI, style-bible reference
-> images + FLUX.2 best-of-N keyframes, and video generation + quality gate (mock
-> mode produces genuinely playable clips). Phases 4–6 scaffolded.
-> See [docs/ROADMAP.md](docs/ROADMAP.md).
+> **Status:** Phases 1–4 complete — storyboard + review UI, FLUX.2 best-of-N
+> keyframes, video generation + quality gate (playable clips), and the audio build
+> (ElevenLabs narration + music bed + **librosa** beat grid + native-track mix).
+> Phases 5–6 scaffolded. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ---
 
@@ -51,7 +51,10 @@ spend**. Flip `MOCK_GENERATION=false` and supply keys to go live (see
 5. The winning keyframes are **animated into clips** by the routed model; native
    audio is demuxed per clip and a **vision quality gate** flags artifacts for
    one-click regeneration. Clips play right in the browser.
-6. (Phases 4–5) Audio build → AI editor → draft/final render.
+6. The **audio build** adds ElevenLabs narration in one locked voice, a music bed
+   with a librosa **beat grid**, and a mix plan that ducks native audio under
+   narration (dialogue scenes pause narration).
+7. (Phase 5) AI editor (Edit Decision List) → draft/final FFmpeg render.
 
 ## Documentation
 
@@ -75,9 +78,9 @@ Anthropic SDK, ElevenLabs. Assembly: FFmpeg. Storage: MinIO (S3-compatible).
 
 ```bash
 # Self-contained unit + API integration tests (SQLite + eager Celery, no infra)
-docker compose exec api python -m pytest -q          # 29 passed
+docker compose exec api python -m pytest -q          # 49 passed
 
-# Live smoke test against the running stack (59 checks across every endpoint)
+# Live smoke test against the running stack (74 checks across every endpoint)
 python scripts/smoke_test.py
 
 # Frontend type-check + production build

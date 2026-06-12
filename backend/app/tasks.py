@@ -223,8 +223,10 @@ def _keyframes_for_scene(db, project: Project, scene: Scene, kf_stage, reference
     db.flush()
 
     # Clear any previous keyframe assets for this scene (idempotent re-runs).
+    # Remove via the relationship (delete-orphan) so the in-memory collection
+    # stays consistent — db.delete() here would trip the cascade on re-runs.
     for a in [a for a in project.assets if a.kind == "keyframe" and a.scene_id == scene.id]:
-        db.delete(a)
+        project.assets.remove(a)
     db.flush()
 
     scene_dict = {
@@ -265,19 +267,9 @@ def _keyframes_for_scene(db, project: Project, scene: Scene, kf_stage, reference
 
 def _store_asset(db, project_id, scene_id, kind, data: bytes, content_type, meta=None) -> Asset:
     """Put bytes in MinIO and create the Asset row pointing at them."""
-    from .storage import put_bytes
+    from .asset_store import store_asset
 
-    asset = Asset(
-        project_id=project_id, scene_id=scene_id, kind=kind,
-        content_type=content_type, meta=meta or {},
-    )
-    ext = "png" if "png" in content_type else ("jpg" if "jpeg" in content_type else "bin")
-    key = f"projects/{project_id}/{kind}/{asset.id}.{ext}"
-    put_bytes(key, data, content_type)
-    asset.storage_key = key
-    db.add(asset)
-    db.flush()
-    return asset
+    return store_asset(db, project_id, scene_id, kind, data, content_type, meta)
 
 
 # ---------------------------------------------------------------------------
@@ -354,10 +346,11 @@ def _clip_for_scene(db, project, scene, v_stage, q_stage, tier, char_sheet, ref_
     db.add(scene)
     db.flush()
 
-    # Clear previous clip/native/frame assets for idempotent re-runs.
+    # Clear previous clip/native/frame assets for idempotent re-runs (remove via
+    # the relationship so the cascade stays consistent on full regenerates).
     for a in [a for a in project.assets
               if a.scene_id == scene.id and a.kind in ("clip", "native_audio", "frame")]:
-        db.delete(a)
+        project.assets.remove(a)
     db.flush()
 
     keyframe_bytes = get_bytes(keyframe.storage_key)
@@ -414,6 +407,90 @@ def _clip_for_scene(db, project, scene, v_stage, q_stage, tier, char_sheet, ref_
     db.add(scene)
     db.flush()
     return scene.status
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: audio build (narration + music beat grid + native leveling)
+# ---------------------------------------------------------------------------
+
+@celery_app.task(bind=True, name="storyforge.build_audio")
+def build_audio_task(self, project_id: str, job_id: str, scene_id: str | None = None) -> dict:
+    """Synthesize ElevenLabs narration per narrated scene with the locked project
+    voice, ensure the music bed's beat grid, and record the native-track levels.
+    Dialogue scenes are skipped (native audio carries the speech)."""
+    from .pipeline import audio as a_stage
+
+    with session_scope() as db:
+        project = db.get(Project, project_id)
+        if not project:
+            _set_job(db, job_id, status=JobStatus.FAILED.value, error="project not found")
+            return {"ok": False}
+
+        _set_job(db, job_id, status=JobStatus.RUNNING.value, progress=0.05)
+        voice_id = project.voice_id or a_stage.DEFAULT_VOICE_ID
+
+        # 1) Ensure the music bed's beat grid (if a bed has been chosen).
+        _ensure_beat_grid(db, project, a_stage)
+        _set_job(db, job_id, progress=0.15)
+
+        # 2) Narration per narrated scene.
+        scenes = (
+            [s for s in project.scenes if s.id == scene_id]
+            if scene_id else sorted(project.scenes, key=lambda s: s.scene_number)
+        )
+        narrated = skipped = failed = 0
+        for i, scene in enumerate(scenes):
+            try:
+                if scene.audio_mode == "dialogue" or not (scene.narration_text or "").strip():
+                    skipped += 1
+                else:
+                    _narration_for_scene(db, project, scene, voice_id, a_stage)
+                    narrated += 1
+            except Exception as exc:  # noqa: BLE001 — isolate per-scene failures
+                log.exception("narration failed for scene %s", scene.scene_number)
+                failed += 1
+            db.flush()
+            _set_job(db, job_id, progress=0.15 + 0.8 * (i + 1) / len(scenes))
+
+        if not scene_id and (narrated or any(a.kind == "music" for a in project.assets)):
+            project.status = ProjectStatus.AUDIO.value
+            db.add(project)
+
+        _set_job(db, job_id, status=JobStatus.SUCCESS.value, progress=1.0,
+                 result={"narrated": narrated, "skipped": skipped, "failed": failed})
+        return {"ok": True, "narrated": narrated, "skipped": skipped, "failed": failed}
+
+
+def _narration_for_scene(db, project, scene, voice_id, a_stage) -> None:
+    for a in [a for a in project.assets if a.kind == "narration" and a.scene_id == scene.id]:
+        project.assets.remove(a)  # delete-orphan; keeps the collection consistent
+    db.flush()
+    data, content_type, duration = a_stage.synth_narration(
+        text=scene.narration_text, voice_id=voice_id
+    )
+    _store_asset(
+        db, project.id, scene.id, "narration", data, content_type,
+        meta={"voice_id": voice_id, "duration": duration, "chars": len(scene.narration_text)},
+    )
+
+
+def _ensure_beat_grid(db, project, a_stage) -> None:
+    from .storage import get_bytes
+
+    music = next((a for a in project.assets if a.kind == "music"), None)
+    if not music:
+        return
+    meta = dict(music.meta or {})
+    if meta.get("beat_grid"):
+        return
+    suffix = ".mp3" if "mpeg" in (music.content_type or "") or "mp3" in (music.content_type or "") else ".wav"
+    grid = a_stage.beat_grid(
+        audio_bytes=get_bytes(music.storage_key), suffix=suffix, bpm_hint=meta.get("bpm"),
+    )
+    meta["beat_grid"] = grid
+    music.meta = meta
+    db.add(music)
+    db.flush()
 
 
 # ---------------------------------------------------------------------------

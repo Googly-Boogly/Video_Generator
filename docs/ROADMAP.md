@@ -51,13 +51,20 @@ built before any real provider is wired.
   `pages/Clips.tsx`.
 - Tests: 29 pytest + 59-check live smoke.
 
-## 🔜 Phase 4 — Audio build
+## ✅ Phase 4 — Audio build (done)
 
-- ElevenLabs narration per narrated scene with the locked project voice.
-- Music bed + librosa beat grid (cut-on-beat).
-- Native tracks leveled per the hybrid audio strategy (15–30% under narration).
-- Wires: `pipeline/audio.py`, ElevenLabs, librosa. (Enable the commented audio
-  deps in `requirements.txt`.)
+- ElevenLabs narration per narrated scene with the locked project voice
+  (`Project.voice_id`); dialogue scenes are skipped (native audio carries speech).
+- One continuous music bed (upload or built-in library) with a **librosa beat
+  grid** detected on the real audio (runs in mock mode too — no AI spend).
+- Native tracks leveled per the hybrid strategy via a `mix-plan` (narration 0 dB,
+  native −16 dB ducked, music −18 dB; dialogue pauses narration). Project advances
+  `clips → audio`.
+- Wires: `providers/elevenlabs_provider.py`, `pipeline/audio.py`, `media.synth_music_bed`,
+  `asset_store.py`, `routers/audio.py`, frontend `pages/Audio.tsx`. librosa +
+  soundfile enabled in `requirements.txt`; `libsndfile1` in the image.
+- Tests: 49 pytest + 74-check live smoke. (Also fixed a latent delete-orphan
+  cascade bug on asset re-runs — see TESTING.md.)
 
 ## 🔜 Phase 5 — AI editor + renders
 

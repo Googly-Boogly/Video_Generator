@@ -171,3 +171,15 @@ class AssetOut(BaseModel):
 
 class SelectKeyframeRequest(BaseModel):
     asset_id: str
+
+
+# ---------------------------------------------------------------------------
+# Audio (Phase 4)
+# ---------------------------------------------------------------------------
+
+class VoiceSelect(BaseModel):
+    voice_id: str = Field(min_length=1)
+
+
+class MusicLibrarySelect(BaseModel):
+    track_id: str = Field(min_length=1)

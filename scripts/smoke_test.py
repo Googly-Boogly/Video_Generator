@@ -160,9 +160,34 @@ c, rvj = call("POST", f"/api/projects/{pid}/scenes/{s0['id']}/video"); poll(rvj[
 c, s0b = call("GET", f"/api/projects/{pid}/scenes/{s0['id']}")
 check("regenerate yields a fresh clip", s0b["clip_asset_id"] and s0b["clip_asset_id"] != old_clip)
 
+print("== audio: catalogs, voice, music + beat grid ==")
+c, voices = call("GET", "/api/voices"); check("voices catalog", c==200 and len(voices["voices"])>=3, c)
+c, lib = call("GET", "/api/music/library"); check("music library", c==200 and len(lib["tracks"])>=3, c)
+c, _ = call("POST", f"/api/projects/{pid}/voice", {"voice_id":"bogus"}); check("bad voice rejected 400", c==400, c)
+c, v = call("POST", f"/api/projects/{pid}/voice", {"voice_id":"voice_atlas"}); check("set voice", v.get("voice_id")=="voice_atlas", v)
+c, m = call("POST", f"/api/projects/{pid}/music/library", {"track_id":"upbeat-128"}); check("pick library music 201", c==201, c)
+grid = m["meta"]["beat_grid"]
+check("librosa detected a beat grid", grid["engine"]=="librosa" and grid["bpm"]>0 and len(grid["beats"])>5, grid.get("engine"))
+
+print("== audio: build narration + rebuild ==")
+c, aj = call("POST", f"/api/projects/{pid}/audio"); check("audio build 202", c==202, c)
+j = poll(aj["id"], timeout=60); check("audio job success", j["status"]=="success", j)
+check("narration produced", j["result"]["narrated"]>=1, j["result"])
+c, narr = call("GET", f"/api/projects/{pid}/narration")
+check("narration assets match", len(narr)==j["result"]["narrated"], len(narr))
+check("narration has voice + duration", bool(narr[0]["meta"]["voice_id"]) and narr[0]["meta"]["duration"]>0)
+c, proj = call("GET", f"/api/projects/{pid}"); check("project status -> audio", proj["status"]=="audio", proj["status"])
+# rebuild must not trip the delete-orphan cascade nor duplicate narration
+c, aj2 = call("POST", f"/api/projects/{pid}/audio"); j2 = poll(aj2["id"], timeout=60)
+check("audio rebuild success (no cascade)", j2["status"]=="success", j2)
+c, narr2 = call("GET", f"/api/projects/{pid}/narration")
+check("rebuild does not duplicate narration", len(narr2)==len(narr), (len(narr), len(narr2)))
+c, mp = call("GET", f"/api/projects/{pid}/mix-plan")
+check("mix plan levels present", mp["levels"]["native_db"]==-16.0 and mp["levels"]["music_db"]==-18.0, mp.get("levels"))
+
 print("== jobs listing ==")
 c, jobs = call("GET", f"/api/jobs/project/{pid}")
-check("jobs for project (>=4)", c==200 and len(jobs)>=4, len(jobs))
+check("jobs for project (>=6)", c==200 and len(jobs)>=6, len(jobs))
 
 print("== cleanup ==")
 c, _ = call("DELETE", f"/api/projects/{pid}")

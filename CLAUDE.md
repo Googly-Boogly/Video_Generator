@@ -9,9 +9,10 @@ behavior or structure changes.
 pipeline. Fully dockerized: `docker compose up` brings up six services
 (`frontend`, `api`, `worker`, `redis`, `postgres`, `minio`).
 
-**Status:** Phases 1–3 done (storyboard + review UI; style-bible reference images
-+ FLUX.2 best-of-N keyframes; video generation + quality gate). Phases 4–6
-scaffolded. See [docs/ROADMAP.md](docs/ROADMAP.md).
+**Status:** Phases 1–4 done (storyboard + review UI; FLUX.2 best-of-N keyframes;
+video generation + quality gate; audio build — ElevenLabs narration + music bed +
+librosa beat grid + mix plan). Phases 5–6 scaffolded.
+See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Ports (IMPORTANT — non-default)
 
@@ -47,7 +48,7 @@ the FFmpeg path is exercised. FFmpeg is in the backend image; Phase 3 tests use 
 ```bash
 docker compose up --build              # start everything
 docker compose restart worker          # REQUIRED after editing tasks.py (Celery has no hot-reload)
-docker compose exec api python -m pytest -q     # 29 tests, FFmpeg-in-image only
+docker compose exec api python -m pytest -q     # 49 tests, FFmpeg+librosa in image
 docker compose exec frontend npm run build      # tsc type-check + prod build
 python scripts/smoke_test.py           # 49 live checks against the running stack
 docker compose logs -f api|worker      # tail logs
@@ -82,15 +83,16 @@ backend/app/
   config.py models.py schemas.py state.py models_config.py cost.py
   llm.py            Anthropic: complete_json + rank_images (vision)
   storage.py        MinIO/S3 helper
-  media.py          FFmpeg: encode clip, demux native audio, extract frames
-  providers/        external calls (fal_provider) behind the mock flag
+  asset_store.py    store_asset(): put bytes in MinIO + create the Asset row
+  media.py          FFmpeg: encode clip, demux native audio, extract frames, synth music
+  providers/        fal_provider (image/video) + elevenlabs_provider (TTS) — mock-gated
   celery_app.py tasks.py            the ONLY place generation runs
   pipeline/         style_bible storyboard keyframes video quality audio editor
                     assemble + prompts.py (per-model translator) + mock.py
-  routers/          config projects storyboard keyframes video assets jobs
+  routers/          config projects storyboard keyframes video audio assets jobs
   main.py
 frontend/src/
-  pages/  Home NewProject StoryboardReview Keyframes Clips
+  pages/  Home NewProject StoryboardReview Keyframes Clips Audio
   components/SceneCard.tsx   lib/api.ts   types.ts
 scripts/smoke_test.py        docs/        docker-compose.yml  .env.example
 ```
@@ -101,8 +103,8 @@ Keep all three green under `MOCK_GENERATION=true` (CI must never spend money):
 
 - **pytest** (`backend/tests/`) — unit (`test_pipeline_mock.py`) + API integration
   (`test_api_integration.py`, SQLite + eager Celery + in-memory storage shim).
-  Currently **29 passed**.
-- **smoke** (`scripts/smoke_test.py`) — **59 checks** against the live stack.
+  Currently **49 passed**.
+- **smoke** (`scripts/smoke_test.py`) — **74 checks** against the live stack.
 - **frontend** — `npm run build` must type-check clean (dev mode hides TS errors).
 
 Add a regression test for every behavior you add or bug you fix. See
@@ -113,9 +115,14 @@ Add a regression test for every behavior you add or bug you fix. See
 - New paid stage → add to `pipeline/`, keep a mock path, wire the real provider in
   `providers/`, add cost to `models_config.py`, expose via a router that enqueues a
   Celery task, then add pytest + smoke coverage.
-- New asset type → store via `tasks._store_asset` (MinIO + `Asset` row), serve via
-  the asset proxy. Reference the `kind` consistently
+- New asset type → store via `asset_store.store_asset` (MinIO + `Asset` row), serve
+  via the asset proxy. Reference the `kind` consistently
   (`reference|keyframe|clip|native_audio|narration|music|draft|final|frame`).
+- **Clearing prior assets/scenes? Use `project.assets.remove(a)` /
+  `project.scenes.clear()`, NOT `db.delete(a)`.** The relationships are
+  `cascade="all, delete-orphan"`; calling `db.delete()` on a child that's still in
+  the loaded collection trips the cascade on re-run/rebuild paths (a bug we've hit
+  three times). Removing through the collection keeps it consistent.
 - Keep `frontend/src/types.ts` in sync with `backend/app/schemas.py`.
 
 ## Docs index

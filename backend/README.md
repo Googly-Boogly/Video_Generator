@@ -17,12 +17,13 @@ app/
   cost.py          cost estimator
   llm.py           Anthropic wrapper (complete_json, rank_images vision)
   storage.py       MinIO/S3 helper
-  media.py         FFmpeg: encode clip, demux native audio, extract frames
-  providers/       external provider calls (fal_provider) behind the mock flag
+  asset_store.py   store_asset(): put bytes in MinIO + create the Asset row
+  media.py         FFmpeg: encode clip, demux native audio, extract frames, synth music
+  providers/       fal_provider (image/video) + elevenlabs_provider (TTS)
   celery_app.py    Celery app
   tasks.py         Celery tasks (only place generation runs)
   pipeline/        one module per stage (+ prompts.py, mock.py)
-  routers/         config, projects, storyboard, keyframes, video, assets, jobs
+  routers/         config, projects, storyboard, keyframes, video, audio, assets, jobs
   main.py          app assembly, CORS, lifespan
 alembic/           migrations (env reads DATABASE_URL)
 tests/             unit + API integration (SQLite + eager Celery)
@@ -32,7 +33,7 @@ tests/             unit + API integration (SQLite + eager Celery)
 
 ```bash
 # Via compose (recommended): see ../README.md
-docker compose exec api python -m pytest -q       # 29 tests (uses FFmpeg in the image)
+docker compose exec api python -m pytest -q       # 49 tests (uses FFmpeg + librosa)
 
 # Standalone uvicorn (needs Postgres/Redis/MinIO reachable):
 uvicorn app.main:app --reload

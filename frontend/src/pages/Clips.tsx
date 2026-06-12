@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, assetUrl, pollJob } from "../lib/api";
 import type { Asset, Project, Scene } from "../types";
 
@@ -7,6 +7,8 @@ type FrameMap = Record<string, Asset[]>;
 
 export default function Clips() {
   const { id } = useParams<{ id: string }>();
+  const nav = useNavigate();
+  const [advancing, setAdvancing] = useState(false);
   const [project, setProject] = useState<Project | null>(null);
   const [scenes, setScenes] = useState<Scene[]>([]);
   const [frames, setFrames] = useState<FrameMap>({});
@@ -163,8 +165,22 @@ export default function Clips() {
             ? "Clips ready. Next: narration, music bed, and the native-audio mix."
             : "Generate clips for every scene to continue."}
         </p>
-        <button className="btn-primary" disabled title="Audio build lands in Phase 4">
-          Build audio → (Phase 4)
+        <button
+          className="btn-primary"
+          disabled={!anyClips || advancing}
+          onClick={async () => {
+            if (!id) return;
+            setAdvancing(true);
+            try {
+              await api.buildAudio(id);
+              nav(`/projects/${id}/audio`);
+            } catch (e: any) {
+              setError(e.message ?? "Failed to start audio");
+              setAdvancing(false);
+            }
+          }}
+        >
+          {advancing ? "Starting…" : "Build audio →"}
         </button>
       </div>
     </div>

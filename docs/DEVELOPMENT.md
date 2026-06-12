@@ -33,6 +33,10 @@ Source is bind-mounted, so both servers hot-reload:
 The **Celery worker does not hot-reload** — after editing `tasks.py` or anything it
 imports, run `docker compose restart worker`.
 
+**Adding a Python dependency** (e.g. librosa in Phase 4) requires an image rebuild:
+`docker compose build api worker && docker compose up -d api worker`. The backend
+image ships FFmpeg, `libsndfile1` (for librosa/soundfile), and `pytest`.
+
 ## Common commands
 
 ```bash
