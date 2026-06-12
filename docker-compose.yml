@@ -1,0 +1,111 @@
+name: storyforge
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: storyforge
+      POSTGRES_PASSWORD: storyforge
+      POSTGRES_DB: storyforge
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"   # host 5433 (5432 used by another local stack)
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U storyforge"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"   # host 6380 (6379 used by another local stack)
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: storyforge
+      MINIO_ROOT_PASSWORD: storyforge-secret
+    volumes:
+      - miniodata:/data
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # console
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: ./backend
+    entrypoint: ["/app/entrypoint.sh"]
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://storyforge:storyforge@postgres:5432/storyforge
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      MINIO_ENDPOINT: minio:9000
+      MINIO_PUBLIC_ENDPOINT: http://localhost:9000
+      FRONTEND_ORIGIN: http://localhost:5273
+    volumes:
+      - ./backend:/app
+      - assets:/app/_assets
+    ports:
+      - "8800:8000"   # host 8800 (8000 used by another local stack)
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  worker:
+    build: ./backend
+    entrypoint: ["/app/entrypoint.sh"]
+    command: ["celery", "-A", "app.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=4"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://storyforge:storyforge@postgres:5432/storyforge
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      MINIO_ENDPOINT: minio:9000
+      MINIO_PUBLIC_ENDPOINT: http://localhost:9000
+    volumes:
+      - ./backend:/app
+      - assets:/app/_assets
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
+    environment:
+      VITE_API_BASE: http://localhost:8800
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "5273:5173"   # host 5273 (5173 used by another local stack)
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  miniodata:
+  assets:
