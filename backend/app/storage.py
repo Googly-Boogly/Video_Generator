@@ -47,6 +47,14 @@ def get_bytes(key: str) -> bytes:
     return obj["Body"].read()
 
 
+def delete_object(key: str) -> None:
+    """Best-effort delete of a single object (never raises)."""
+    try:
+        _client().delete_object(Bucket=settings.minio_bucket, Key=key)
+    except Exception:  # noqa: BLE001 — storage cleanup must not break the txn
+        pass
+
+
 def public_url(key: str, expires: int = 3600) -> str:
     """Presigned URL the browser can hit directly.
 

@@ -55,8 +55,8 @@ All settings come from env / `.env` via `app/config.py` (`Settings`). Key vars:
 | Var | Default | Notes |
 | --- | ------- | ----- |
 | `MOCK_GENERATION` | `true` | `false` makes stages call real providers |
-| `FAL_KEY` / `ANTHROPIC_API_KEY` / `ELEVENLABS_API_KEY` | empty | required only when live |
-| `ANTHROPIC_MODEL` | `claude-opus-4-8` | storyboard / revision / editor model |
+| `FAL_KEY` / `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `ELEVENLABS_API_KEY` | empty | required only when live (set the LLM key you use) |
+| `DEFAULT_LLM` | `gpt-5.4-nano` | default LLM; a project can pick `gpt-5.4-nano` or `claude-haiku-4-6` |
 | `DATABASE_URL` | postgres in compose | tests override to SQLite |
 | `MINIO_PUBLIC_ENDPOINT` | `http://localhost:9000` | what presigned URLs point the browser at |
 
@@ -76,7 +76,7 @@ docker compose exec api alembic upgrade head
 ## Going live
 
 1. Set `MOCK_GENERATION=false` in `.env`.
-2. Fill in `FAL_KEY`, `ANTHROPIC_API_KEY`, `ELEVENLABS_API_KEY`.
+2. Fill in `FAL_KEY`, `ELEVENLABS_API_KEY`, and your LLM key(s) (`OPENAI_API_KEY` and/or `ANTHROPIC_API_KEY`).
 3. `docker compose up -d` (restart `api` + `worker` to pick up env).
 
 Stages not yet wired for real (keyframes/video/quality/audio/editor/assemble in

@@ -12,6 +12,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    event,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -36,6 +37,9 @@ class Project(Base):
     style_preset: Mapped[str] = mapped_column(String(64), default="cinematic")
 
     status: Mapped[str] = mapped_column(String(32), default=ProjectStatus.DRAFT.value)
+
+    # Which LLM handles this project's prompts (storyboard / revision / vision).
+    llm_model: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     # Locked project voice (ElevenLabs voice id) — narration identity.
     voice_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -112,6 +116,17 @@ class Asset(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     project: Mapped["Project"] = relationship(back_populates="assets")
+
+
+@event.listens_for(Asset, "before_delete")
+def _delete_asset_blob(mapper, connection, target: "Asset") -> None:
+    """Delete the backing MinIO object whenever an Asset row is removed — covers
+    both project-delete cascade and asset replacement (regeneration). Best-effort.
+    """
+    if target.storage_key:
+        from .storage import delete_object
+
+        delete_object(target.storage_key)
 
 
 class Job(Base):

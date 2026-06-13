@@ -71,6 +71,7 @@ def generate_storyboard_task(self, project_id: str, job_id: str) -> dict:
                     idea=project.idea,
                     style_preset=project.style_preset,
                     aspect_ratio=project.aspect_ratio,
+                    llm=project.llm_model,
                 )
                 project.status = ProjectStatus.STYLED.value
                 db.add(project)
@@ -84,6 +85,7 @@ def generate_storyboard_task(self, project_id: str, job_id: str) -> dict:
                 aspect_ratio=project.aspect_ratio,
                 style_preset=project.style_preset,
                 style_bible=project.style_bible,
+                llm=project.llm_model,
             )
 
             # 3) Replace scenes.
@@ -118,6 +120,7 @@ def revise_storyboard_task(self, project_id: str, job_id: str, instruction: str)
                 instruction=instruction,
                 storyboard=current,
                 style_bible=project.style_bible,
+                llm=project.llm_model,
             )
             _write_scenes(db, project, board)
             project.status = ProjectStatus.STORYBOARDED.value
@@ -240,7 +243,8 @@ def _keyframes_for_scene(db, project: Project, scene: Scene, kf_stage, reference
         scene=scene_dict, style_bible=project.style_bible,
         aspect_ratio=project.aspect_ratio, reference_urls=reference_urls,
     )
-    ranking = kf_stage.rank_keyframes(variants, scene=scene_dict, character_sheet=char_sheet)
+    ranking = kf_stage.rank_keyframes(variants, scene=scene_dict, character_sheet=char_sheet,
+                                      llm=project.llm_model)
     score_by_index = {s["index"]: s for s in ranking.get("scores", [])}
     winner_index = ranking.get("winner", 0)
 
@@ -400,7 +404,7 @@ def _clip_for_scene(db, project, scene, v_stage, q_stage, tier, char_sheet, ref_
     # Quality gate.
     qr = q_stage.check_clip(
         clip_bytes=clip.clip_bytes, scene=scene_dict, character_sheet=char_sheet,
-        native_audio_bytes=clip.native_audio_bytes or None,
+        native_audio_bytes=clip.native_audio_bytes or None, llm=project.llm_model,
     )
     for idx, frame in enumerate(qr.frames):
         _store_asset(db, project.id, scene.id, "frame", frame, "image/jpeg",
@@ -466,7 +470,10 @@ def build_audio_task(self, project_id: str, job_id: str, scene_id: str | None = 
             db.flush()
             _set_job(db, job_id, progress=0.15 + 0.8 * (i + 1) / len(scenes))
 
-        if not scene_id and (narrated or any(a.kind == "music" for a in project.assets)):
+        # Advance when a full build produced narration, OR the project has clips
+        # (so an all-dialogue project — no narration to synthesize — still moves on,
+        # since native audio carries the speech).
+        if not scene_id and (narrated or any(s.clip_asset_id for s in project.scenes)):
             project.status = ProjectStatus.AUDIO.value
             db.add(project)
 
@@ -532,7 +539,7 @@ def build_edl_task(self, project_id: str, job_id: str) -> dict:
 
         edl = e_stage.build_edl(
             project={"aspect_ratio": project.aspect_ratio, "idea": project.idea},
-            scenes=scenes, beat_grid=beat_grid, frames=None,
+            scenes=scenes, beat_grid=beat_grid, frames=None, llm=project.llm_model,
         )
         project.edl = edl
         project.status = ProjectStatus.EDITED.value

@@ -28,7 +28,9 @@ def _asset_out(a: Asset) -> AssetOut:
 
 def _enqueue_keyframes(db: Session, project: Project, scene_id: str | None) -> Job:
     from ..tasks import generate_keyframes_task
+    from ..jobs_util import ensure_no_active_job
 
+    ensure_no_active_job(db, project.id, [JobType.KEYFRAMES.value])
     job = Job(project_id=project.id, type=JobType.KEYFRAMES.value,
               status=JobStatus.QUEUED.value, scene_id=scene_id)
     db.add(job)

@@ -39,3 +39,24 @@ def init_db() -> None:
     from . import models  # noqa: F401  (ensure models are registered)
 
     Base.metadata.create_all(bind=engine)
+    _ensure_columns()
+
+
+def _ensure_columns() -> None:
+    """Lightweight additive migrations for columns added after a table already
+    exists (create_all only creates missing *tables*, not columns). Idempotent.
+    """
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    additions = {
+        "projects": [("llm_model", "VARCHAR(64)")],
+    }
+    with engine.begin() as conn:
+        for table, cols in additions.items():
+            if table not in insp.get_table_names():
+                continue
+            existing = {c["name"] for c in insp.get_columns(table)}
+            for name, ddl in cols:
+                if name not in existing:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))

@@ -154,6 +154,9 @@ export default function StoryboardReview() {
             <span className="px-2 py-0.5 rounded bg-panel2 border border-edge">{project.target_length}s target</span>
             <span className="px-2 py-0.5 rounded bg-panel2 border border-edge">{project.aspect_ratio}</span>
             <span className="px-2 py-0.5 rounded bg-panel2 border border-edge capitalize">{project.style_preset}</span>
+            {project.llm_model && (
+              <span className="px-2 py-0.5 rounded bg-accent2/10 border border-accent2/30 text-accent2">✎ {project.llm_model}</span>
+            )}
             <span className="px-2 py-0.5 rounded bg-panel2 border border-edge">{ordered.length} scenes · {totalDuration.toFixed(0)}s</span>
           </div>
         </div>

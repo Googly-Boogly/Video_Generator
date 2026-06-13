@@ -138,6 +138,25 @@ def test_video_clip_is_playable_mp4_and_demuxes_audio():
     assert "flagged" in qr.report
 
 
+def test_veo_routes_to_google_others_to_fal():
+    from app.models_config import route
+    assert route("veo-31").provider == "google" and route("veo-31").google_id
+    assert route("veo-31-lite").provider == "google"
+    assert route("kling-3-pro").provider == "fal" and route("kling-3-pro").fal_id
+    assert route("seedance-2").provider == "fal"
+    assert route("flux2-dev").provider == "fal"
+
+
+def test_video_dispatch_picks_provider(monkeypatch):
+    from app.providers import generation, fal_provider, google_provider
+    monkeypatch.setattr(fal_provider, "generate_video", lambda **k: b"FAL:" + k["model_id"].encode())
+    monkeypatch.setattr(google_provider, "generate_video", lambda **k: b"GOOGLE:" + k["model_id"].encode())
+    fal_out = generation.generate_video(model_id="kling-3-pro", prompt="x", duration=5, aspect_ratio="16:9")
+    goog_out = generation.generate_video(model_id="veo-31", prompt="x", duration=5, aspect_ratio="16:9")
+    assert fal_out == b"FAL:kling-3-pro"
+    assert goog_out == b"GOOGLE:veo-31"
+
+
 def test_dialogue_scene_routes_to_veo():
     from app.pipeline import video as v_stage
     from app.models_config import Tier
@@ -188,6 +207,23 @@ def test_build_edl_structure_and_beat_snap():
     assert edl["cuts"][1]["mix"]["pause_narration_for_dialogue"] is True
     assert edl["cuts"][1]["mix"]["narration_db"] is None
     assert edl["levels"]["music_db"] == -18.0
+
+
+def test_llm_routing_and_anthropic_part_conversion():
+    from app.llm_config import llm_route, DEFAULT_LLM, is_known
+    assert llm_route(None).id == DEFAULT_LLM
+    assert llm_route("claude-haiku-4-6").provider == "anthropic"
+    assert llm_route("gpt-5.4-nano").provider == "openai"
+    assert llm_route("nonsense").id == DEFAULT_LLM        # unknown → default
+    assert is_known("claude-haiku-4-6") and not is_known("nope")
+    # OpenAI-style image part → Anthropic content block
+    from app.llm import _image_part, _to_anthropic_parts
+    part = _image_part(b"\x89PNGdata", "image/png")
+    blocks = _to_anthropic_parts([{"type": "text", "text": "hi"}, part])
+    assert blocks[0] == {"type": "text", "text": "hi"}
+    assert blocks[1]["type"] == "image"
+    assert blocks[1]["source"]["media_type"] == "image/png"
+    assert blocks[1]["source"]["type"] == "base64"
 
 
 def test_mock_edl_pauses_narration_for_dialogue():

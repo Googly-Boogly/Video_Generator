@@ -39,15 +39,16 @@ spend**. Flip `MOCK_GENERATION=false` and supply keys to go live (see
 
 ## What it does
 
-1. You describe an idea (length, aspect ratio, style preset).
-2. Claude writes a **style bible** (locked palette, lighting, lens, character
+1. You describe an idea (length, aspect ratio, style preset) and pick the **writer
+   LLM** — `gpt-5.4-nano` (OpenAI) or `claude-haiku-4-6` (Anthropic).
+2. That LLM writes a **style bible** (locked palette, lighting, lens, character
    sheet) and a shot-by-shot **storyboard**.
 3. You **review and edit** the storyboard — edit any field, reorder, add/delete
    scenes, pick a model per scene, toggle narrated/dialogue audio, or revise
    conversationally ("make scene 3 moodier"). **Nothing costs money until you
    approve.**
 4. On approval, FLUX.2 renders **3 keyframe variants per scene** (with the style
-   reference images attached for consistency); Claude-vision ranks them and you
+   reference images attached for consistency); the vision model ranks them and you
    pick the winner in a **best-of-N selection UI**.
 5. The winning keyframes are **animated into clips** by the routed model; native
    audio is demuxed per clip and a **vision quality gate** flags artifacts for
@@ -77,13 +78,13 @@ spend**. Flip `MOCK_GENERATION=false` and supply keys to go live (see
 
 Backend: Python 3.12 · FastAPI · SQLAlchemy + Alembic · PostgreSQL · Celery + Redis.
 Frontend: React (Vite) · TypeScript · Tailwind. Generation: fal.ai (`fal-client`),
-Anthropic SDK, ElevenLabs. Assembly: FFmpeg. Storage: MinIO (S3-compatible).
+OpenAI + Anthropic (selectable LLM), ElevenLabs. Assembly: FFmpeg. Storage: MinIO.
 
 ## Testing
 
 ```bash
 # Self-contained unit + API integration tests (SQLite + eager Celery, no infra)
-docker compose exec api python -m pytest -q          # 60 passed
+docker compose exec api python -m pytest -q          # 67 passed
 
 # Live smoke test against the running stack (95 checks across every endpoint)
 python scripts/smoke_test.py

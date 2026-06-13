@@ -39,7 +39,7 @@ Six Compose services: `frontend`, `api`, `worker`, `redis`, `postgres`, `minio`.
 ## Core principles
 
 - **Keys are server-side only.** The browser talks exclusively to FastAPI; the
-  `FAL_KEY` / `ANTHROPIC_API_KEY` / `ELEVENLABS_API_KEY` never leave the backend.
+  `FAL_KEY` / `OPENAI_API_KEY` / `ELEVENLABS_API_KEY` never leave the backend.
 - **Every generation step is an async Celery task** — the HTTP layer only creates
   a `Job` row and enqueues. No blocking generation in a request.
 - **Config-driven model routing.** `app/models_config.py` is the single source of
@@ -80,8 +80,10 @@ terminal state by the time the client first polls.
 | `jobs`     | `type`, `status`, `progress`, `scene_id`, `celery_task_id`, `result` (JSON), `error` | One async unit of work; what the UI polls. |
 | `cost_entries` | `step`, `label`, `detail`, `amount`, `mock`, `job_id` | Actual-spend ledger — appended as paid steps run (incl. re-runs). |
 
-`projects → scenes / jobs / assets` cascade delete. Scenes are ordered by
-`scene_number`, which is kept contiguous (1..N) on every add/delete/reorder.
+`projects → scenes / jobs / assets / cost_entries` cascade delete. Scenes are
+ordered by `scene_number`, kept contiguous (1..N) on every add/delete/reorder.
+Deleting an `Asset` (cascade or replacement) fires a `before_delete` event that
+removes the backing MinIO object, so storage never leaks.
 
 ## State machines (`app/state.py`)
 
@@ -137,9 +139,11 @@ Failures raise `FFmpegError`. Tested directly in `tests/test_media.py`.
 | `models_config.py` | Model routing table, pricing, `resolve_video_model()` |
 | `cost.py` | Pre-flight estimate + actual-spend ledger (`record_*`, `dashboard`) |
 | `cost.py` | Cost estimator (per step + full project) |
-| `llm.py` | Anthropic wrapper: `complete_json`, `rank_images` (vision) |
+| `llm.py` | Provider-agnostic LLM dispatch (OpenAI + Anthropic): `complete_json`, `vision_json`, `rank_images` |
+| `llm_config.py` | LLM routing table (`gpt-5.4-nano`, `claude-haiku-4-6`) + `llm_route()` |
 | `storage.py` | MinIO/S3 helper (`put_bytes`, `get_bytes`, `public_url`) |
 | `asset_store.py` | Shared `store_asset()` — put bytes in MinIO + create the `Asset` row |
+| `jobs_util.py` | `ensure_no_active_job()` — concurrent-job guard (409) |
 | `media.py` | FFmpeg: encode clip, demux native audio, extract frames, synth music bed, **assemble_video** (render the EDL) |
 | `providers/` | `fal_provider` (image/video), `elevenlabs_provider` (TTS/voices) — behind the mock flag |
 | `celery_app.py` | Celery app + config |

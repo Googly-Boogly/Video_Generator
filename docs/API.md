@@ -13,6 +13,8 @@ endpoints). Mock mode keeps even those free.
 - Async actions return **202** with a `Job`; poll `GET /api/jobs/{id}` or stream
   `GET /api/jobs/{id}/stream` until `status` is `success` or `failed`.
 - Validation errors → **422**; unknown id → **404**; bad references → **400**.
+- Kicking off a generation step while one of that kind is already queued/running for
+  the project → **409** (concurrent-job guard).
 
 ---
 
@@ -28,7 +30,10 @@ Model table + presets for the UI.
   "aspect_ratios": ["16:9", "9:16", "1:1"],
   "models": [{ "id": "kling-3-pro", "label": "...", "tier": "premium",
                "price_per_second": 0.11, "lip_sync": false, ... }],
-  "video_models": ["kling-3-pro", "kling-25-turbo", "veo-31", ...]
+  "video_models": ["kling-3-pro", "kling-25-turbo", "veo-31", ...],
+  "llms": [{ "id": "gpt-5.4-nano", "label": "GPT-5.4 nano", "provider": "openai", "vision": true },
+           { "id": "claude-haiku-4-6", "label": "Claude Haiku 4.6", "provider": "anthropic", "vision": true }],
+  "default_llm": "gpt-5.4-nano"
 }
 ```
 
@@ -40,7 +45,8 @@ Model table + presets for the UI.
 ## Projects
 
 ### `GET /api/projects`
-List projects (newest first).
+List projects (newest first). Each includes a `thumbnail_url` (a representative
+keyframe/reference image, or `null`) for the history view.
 
 ### `POST /api/projects` → 201
 ```jsonc
@@ -48,7 +54,8 @@ List projects (newest first).
   "title": "optional",
   "target_length": 30,                      // 15 | 30 | 60
   "aspect_ratio": "16:9",                   // 16:9 | 9:16 | 1:1
-  "style_preset": "cinematic" }
+  "style_preset": "cinematic",
+  "llm_model": "gpt-5.4-nano" }             // optional; gpt-5.4-nano | claude-haiku-4-6 (400 if unknown)
 ```
 Returns the project (`status: "draft"`, no scenes yet).
 
@@ -112,7 +119,7 @@ Removes the scene and re-numbers contiguously.
 (else **400**). Returns the re-numbered list.
 
 ### `POST …/scenes/revise` → 202
-`{ "instruction": "make scene 3 moodier" }` (≥2 chars). Kicks off a Claude revision
+`{ "instruction": "make scene 3 moodier" }` (≥2 chars). Kicks off a LLM revision
 task that patches the whole storyboard. Returns a `Job`.
 
 ---

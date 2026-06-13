@@ -16,9 +16,9 @@ style_bible → storyboard → keyframes → video → quality → audio → edi
 | 2 | Style bible + reference images | `style_bible.py` | ✅ 1–2 | Locked palette/lighting/lens + character sheet; 3–5 master reference images (character/environment/color-key) via FLUX.2 |
 | 3 | Storyboard | `storyboard.py` | ✅ 1 | Validated `scenes[]` (see schema below) |
 | 4 | Storyboard review | (API + UI) | ✅ 1 | Human-edited storyboard; conversational revision |
-| 5 | Keyframes (best-of-N) | `keyframes.py` | ✅ 2 | 3× FLUX.2 variants/scene with refs attached + Claude-vision ranked winner; user can override |
+| 5 | Keyframes (best-of-N) | `keyframes.py` | ✅ 2 | 3× FLUX.2 variants/scene with refs attached + the vision model ranked winner; user can override |
 | 6 | Video generation | `video.py` | ✅ 3 | One clip/scene via the routed model (tier-aware) + demuxed native audio |
-| 7 | Quality gate | `quality.py` | ✅ 3 | 4 frames/clip + Claude-vision artifact/identity flags + garbled-speech auto-mute |
+| 7 | Quality gate | `quality.py` | ✅ 3 | 4 frames/clip + the vision model artifact/identity flags + garbled-speech auto-mute |
 | 8 | Audio build | `audio.py` | ✅ 4 | ElevenLabs narration (locked voice), music bed + librosa beat grid, native-track mix plan |
 | 9 | AI editor | `editor.py` | ✅ 5 | Edit Decision List (order, trims, transitions, captions, beat-snap, mix plan) |
 | 10 | Draft → final render | `assemble.py` + `media.py` | ✅ 5 | Real FFmpeg: 480p watermarked draft → 1080p H.264/AAC final with hybrid audio mix |
@@ -30,7 +30,7 @@ if called with `MOCK_GENERATION=false` before then).
 
 ## Storyboard schema (validated)
 
-`pipeline/storyboard.py` validates every storyboard — from Claude or from the mock
+`pipeline/storyboard.py` validates every storyboard — from the LLM or from the mock
 generator — against `schemas.Storyboard` before the rest of the system trusts it.
 
 ```jsonc
@@ -64,7 +64,7 @@ generate_keyframes_task(project_id, [scene_id])
   ├─ per scene (failure isolated → scene.status=failed, others continue):
   │     ├─ scene.status=generating
   │     ├─ 3× FLUX.2 variants, reference images attached  (kind=keyframe assets)
-  │     ├─ Claude-vision ranks → winner + per-variant {score, reason}
+  │     ├─ the vision model ranks → winner + per-variant {score, reason}
   │     ├─ scene.keyframe_asset_id = winner, scene.status=done
   └─ project.status = keyframes
 ```
@@ -90,7 +90,7 @@ generate_video_task(project_id, tier="draft", [scene_id])
   │     │     dialogue → lip-sync model with dialogue_text in the prompt
   │     ├─ generate clip (kind=clip)  ── mock: FFmpeg-encode the keyframe
   │     ├─ demux native audio (kind=native_audio)
-  │     ├─ quality gate: extract 4 frames (kind=frame) → Claude-vision verdict
+  │     ├─ quality gate: extract 4 frames (kind=frame) → the vision model verdict
   │     │     {flagged, reasons, identity_drift}; garble check → auto-mute native
   │     └─ scene.clip_asset_id / native_audio_asset_id / quality;
   │           status = flagged | done
@@ -155,7 +155,7 @@ render_task(final) → assemble.render → media.assemble_video (FFmpeg)
   −18 dB; a final `alimiter` prevents clipping.
 - **Editor signals:** clip durations, narration durations, the librosa beat grid,
   and audio modes. Cuts are beat-snapped (`on_beat`). The live path sends sampled
-  frames to Claude vision; mock is a deterministic rules EDL from the same signals.
+  frames to the vision model; mock is a deterministic rules EDL from the same signals.
 - **Transitions:** non-`cut` cuts (and the intro/outro) render as a fade
   (dip-to-black) — reliable and timeline-exact, so the audio stays in sync.
   Overlapping crossfade (xfade) is a noted future refinement.

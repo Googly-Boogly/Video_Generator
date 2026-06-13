@@ -23,7 +23,7 @@ def _available_video_model_ids() -> list[str]:
 
 def generate_storyboard(
     *, idea: str, target_length: int, aspect_ratio: str, style_preset: str,
-    style_bible: dict | None,
+    style_bible: dict | None, llm: str | None = None,
 ) -> Storyboard:
     if settings.mock_generation:
         default = default_video_model(Tier.PREMIUM, "narrated")
@@ -40,12 +40,13 @@ def generate_storyboard(
                 available_models=_available_video_model_ids(),
             ),
             max_tokens=8192,
+            llm=llm,
         )
     return _validate(raw)
 
 
 def revise_storyboard(
-    *, instruction: str, storyboard: dict, style_bible: dict | None
+    *, instruction: str, storyboard: dict, style_bible: dict | None, llm: str | None = None
 ) -> Storyboard:
     if settings.mock_generation:
         # Deterministic mock revision: tag the affected scene's description so
@@ -58,6 +59,7 @@ def revise_storyboard(
                 instruction=instruction, storyboard=storyboard, style_bible=style_bible
             ),
             max_tokens=8192,
+            llm=llm,
         )
     return _validate(raw)
 

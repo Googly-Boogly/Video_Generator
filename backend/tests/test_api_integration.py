@@ -404,6 +404,94 @@ def test_dialogue_scene_skips_narration(client):
     assert s["mix"]["narration_db"] is None
 
 
+# --- Multi-LLM selection ------------------------------------------------------
+
+def test_llm_catalog_and_per_project_selection(client):
+    cfg = client.get("/api/config").json()
+    ids = {l["id"] for l in cfg["llms"]}
+    assert {"gpt-5.4-nano", "claude-haiku-4-6"} <= ids
+    assert cfg["default_llm"] in ids
+    providers = {l["id"]: l["provider"] for l in cfg["llms"]}
+    assert providers["gpt-5.4-nano"] == "openai"
+    assert providers["claude-haiku-4-6"] == "anthropic"
+
+    # Default when unspecified.
+    p = client.post("/api/projects", json={"idea": "default llm project"}).json()
+    assert p["llm_model"] == cfg["default_llm"]
+    # Explicit pick is persisted.
+    p2 = client.post("/api/projects",
+                     json={"idea": "haiku project", "llm_model": "claude-haiku-4-6"}).json()
+    assert p2["llm_model"] == "claude-haiku-4-6"
+    assert client.get(f"/api/projects/{p2['id']}").json()["llm_model"] == "claude-haiku-4-6"
+    # Unknown id rejected.
+    assert client.post("/api/projects",
+                       json={"idea": "bad llm", "llm_model": "gpt-9-ultra"}).status_code == 400
+
+
+# --- Robustness ---------------------------------------------------------------
+
+def test_delete_project_cleans_storage(client, storage_mem):
+    p = _make_project(client, target_length=15)
+    _storyboard(client, p["id"])
+    pid = p["id"]
+    _keyframes(client, pid)
+    assert [k for k in storage_mem if pid in k]  # blobs exist
+    assert client.delete(f"/api/projects/{pid}").status_code == 204
+    assert [k for k in storage_mem if pid in k] == []  # MinIO objects cleaned up
+
+
+def test_regenerate_cleans_old_blobs(client, storage_mem):
+    p = _make_project(client, target_length=15)
+    _storyboard(client, p["id"])
+    pid = p["id"]
+    _keyframes(client, pid)
+    prefix = f"projects/{pid}/keyframe/"
+    before = {k for k in storage_mem if prefix in k}
+    _keyframes(client, pid)  # full re-run
+    after = {k for k in storage_mem if prefix in k}
+    assert len(after) == len(before)  # no accumulation
+    assert before.isdisjoint(after)   # old blobs deleted, new ones written
+
+
+def test_all_dialogue_audio_advances_status(client):
+    p = _edit_ready(client)  # storyboard + keyframes + video → has clips
+    pid = p["id"]
+    for s in client.get(f"/api/projects/{pid}/scenes").json():
+        client.patch(f"/api/projects/{pid}/scenes/{s['id']}",
+                     json={"audio_mode": "dialogue", "dialogue_text": "x"})
+    job = _audio(client, pid)
+    assert job["result"]["narrated"] == 0 and job["result"]["skipped"] >= 1
+    assert client.get(f"/api/projects/{pid}").json()["status"] == "audio"  # still advances
+
+
+def test_concurrent_job_guard(client):
+    p = _make_project(client, target_length=15)
+    _storyboard(client, p["id"])
+    pid = p["id"]
+    from app.database import SessionLocal
+    from app.models import Job
+    db = SessionLocal()
+    db.add(Job(project_id=pid, type="keyframes", status="running"))
+    db.commit()
+    db.close()
+    assert client.post(f"/api/projects/{pid}/keyframes").status_code == 409
+
+
+def test_single_scene_render(client):
+    p = _make_project(client, target_length=15)
+    _storyboard(client, p["id"])
+    pid = p["id"]
+    scenes = client.get(f"/api/projects/{pid}/scenes").json()
+    for s in scenes[1:]:
+        client.delete(f"/api/projects/{pid}/scenes/{s['id']}")
+    assert len(client.get(f"/api/projects/{pid}/scenes").json()) == 1
+    _keyframes(client, pid)
+    _video(client, pid)
+    _run(client, f"/api/projects/{pid}/edl")
+    dr = _run(client, f"/api/projects/{pid}/render?final=false")
+    assert dr["result"]["kind"] == "draft"  # single-clip concat renders fine
+
+
 # --- Phase 6: cost dashboard --------------------------------------------------
 
 def test_cost_dashboard_records_actual_spend(client):

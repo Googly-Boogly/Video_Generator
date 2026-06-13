@@ -35,6 +35,8 @@ export default function Costs() {
   const actual = cost.actual.total;
   const maxStep = Math.max(0.0001, ...Object.values(cost.actual.by_step));
   const steps = Object.entries(cost.actual.by_step);
+  const overBudget = actual > estimated && estimated > 0;
+  const pct = estimated > 0 ? Math.round((actual / estimated) * 100) : 0;
 
   return (
     <div className="space-y-6">
@@ -52,6 +54,14 @@ export default function Costs() {
         <div className="text-sm rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 px-3 py-2">
           Mock mode — <strong>$0 was actually charged</strong>. The figures below are the real
           provider cost these operations <em>would</em> incur (so you can budget before going live).
+        </div>
+      )}
+
+      {overBudget && (
+        <div className="text-sm rounded-lg bg-red-600/10 border border-red-600/40 text-red-300 px-3 py-2">
+          ⚠ Spend is <strong>{pct}% of the estimate</strong> — regeneration has added
+          ${(actual - estimated).toFixed(2)} over the ${estimated.toFixed(2)} pre-flight estimate.
+          Each re-run of a scene's keyframes/clip is billed again.
         </div>
       )}
 

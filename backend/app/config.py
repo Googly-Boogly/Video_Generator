@@ -35,12 +35,13 @@ class Settings(BaseSettings):
 
     # --- Provider keys (server-side only) ---
     fal_key: str = ""
+    google_api_key: str = ""   # Veo (image/text-to-video) via Google direct
+    openai_api_key: str = ""
     anthropic_api_key: str = ""
     elevenlabs_api_key: str = ""
 
-    # --- Model defaults ---
-    anthropic_model: str = "claude-opus-4-8"
-    anthropic_vision_model: str = "claude-opus-4-8"
+    # --- LLM default (per-project choice can override; see app/llm_config.py) ---
+    default_llm: str = "gpt-5.4-nano"
 
     # --- Frontend origin for CORS ---
     frontend_origin: str = "http://localhost:5173"

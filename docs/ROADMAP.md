@@ -26,7 +26,7 @@ built before any real provider is wired.
   (character / environment / color-key roles), stored in MinIO and reused as
   reference-image inputs for every keyframe.
 - Per scene: 3 FLUX.2 keyframe variants with style references attached.
-- Claude-with-vision auto-ranks variants; the user can override the winner in the
+- a vision model auto-ranks variants; the user can override the winner in the
   **best-of-N selection UI** (`/projects/:id/keyframes`). Only the winner proceeds.
 - Per-scene regenerate; a failed scene is isolated and never kills the project.
 - Project advances `storyboarded → keyframes`.
@@ -43,7 +43,7 @@ built before any real provider is wired.
 - Per-scene Celery status (queued/generating/done/failed/flagged) + per-scene
   regenerate; a failed scene is isolated and never kills the project.
 - Native audio demuxed from every clip into its own asset (FFmpeg).
-- Quality gate: 4 frames/clip extracted (FFmpeg), Claude vision flags artifacts +
+- Quality gate: 4 frames/clip extracted (FFmpeg), the vision model flags artifacts +
   identity drift; garbled-speech check auto-mutes the native track. Flagged clips
   get one-click regenerate. Project advances `keyframes → clips`.
 - **Mock mode produces genuinely playable clips:** FFmpeg encodes the winning
@@ -74,7 +74,7 @@ built before any real provider is wired.
 - AI editor builds an **Edit Decision List** from the storyboard + real signals
   (clip durations, narration durations, beat grid, audio modes): per-cut in/out,
   trims (cut mushy starts/ends), transition, caption, beat-snap, and a per-scene
-  mix plan. Shown for approval. Live path is Claude-vision over extracted frames.
+  mix plan. Shown for approval. Live path is the vision model over extracted frames.
 - **FFmpeg renders the EDL for real:** concat (trimmed) clips, burn captions, and
   build the hybrid audio mix (narration delayed per scene + native ducked −16 dB +
   music bed −18 dB, limiter). Draft = **480p watermarked**; final regenerates hero

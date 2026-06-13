@@ -36,6 +36,7 @@ export const api = {
     target_length: number;
     aspect_ratio: string;
     style_preset: string;
+    llm_model?: string;
   }) => req<Project>("/api/projects", { method: "POST", body: JSON.stringify(body) }),
   deleteProject: (id: string) =>
     req<void>(`/api/projects/${id}`, { method: "DELETE" }),

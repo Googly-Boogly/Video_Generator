@@ -1,7 +1,7 @@
 """Stage 5: FLUX.2 keyframes, best-of-N with style references attached.
 
 Per scene we render N variants (style reference images attached for consistency),
-then Claude-with-vision auto-ranks them. The user can override the winner in the
+then a vision model auto-ranks them. The user can override the winner in the
 UI; only the winner gets animated in Phase 3.
 """
 from __future__ import annotations
@@ -54,7 +54,7 @@ def generate_keyframes(
 
 
 def rank_keyframes(
-    variants: list[KeyframeVariant], *, scene: dict, character_sheet=None
+    variants: list[KeyframeVariant], *, scene: dict, character_sheet=None, llm: str | None = None
 ) -> dict:
     """Auto-rank variants. Returns {winner, scores:[{index,score,reason}]}."""
     if settings.mock_generation:
@@ -75,6 +75,7 @@ def rank_keyframes(
         shot_description=scene.get("shot_description", ""),
         character_sheet=character_sheet,
         images=[(v.image_bytes, v.media_type) for v in variants],
+        llm=llm,
     )
     # Clamp winner to a valid index.
     winner = int(result.get("winner", 0))

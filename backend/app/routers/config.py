@@ -4,6 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from ..config import settings
+from ..llm_config import DEFAULT_LLM, LLM_ROUTES
 from ..models_config import MODEL_ROUTES, Modality
 
 router = APIRouter(prefix="/api/config", tags=["config"])
@@ -21,10 +22,16 @@ def get_config():
         "style_presets": STYLE_PRESETS,
         "target_lengths": [15, 30, 60],
         "aspect_ratios": ["16:9", "9:16", "1:1"],
+        "llms": [
+            {"id": r.id, "label": r.label, "provider": r.provider, "vision": r.vision}
+            for r in LLM_ROUTES.values()
+        ],
+        "default_llm": DEFAULT_LLM,
         "models": [
             {
                 "id": m.id,
                 "label": m.label,
+                "provider": m.provider,
                 "modality": m.modality.value,
                 "tier": m.tier.value,
                 "price_per_image": m.price_per_image,

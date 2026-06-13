@@ -21,7 +21,9 @@ pydantic-settings==2.7.1
 boto3==1.35.92
 
 # --- Generation providers ---
-anthropic==0.42.0
+openai>=1.50,<2
+anthropic>=0.40,<1
+google-genai>=0.3,<2
 fal-client==0.5.6
 elevenlabs==1.50.3
 

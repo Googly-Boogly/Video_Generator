@@ -135,10 +135,12 @@ def add_scene(project_id: str, payload: AddSceneRequest, db: Session = Depends(g
 
 @router.post("/revise", response_model=JobOut, status_code=202)
 def revise_storyboard(project_id: str, payload: ReviseRequest, db: Session = Depends(get_db)):
-    """Conversational revision ('make scene 3 moodier') — patches via Claude."""
+    """Conversational revision ('make scene 3 moodier') — patches via the LLM."""
     from ..tasks import revise_storyboard_task
+    from ..jobs_util import ensure_no_active_job
 
     project = _get_project(db, project_id)
+    ensure_no_active_job(db, project.id, [JobType.STORYBOARD.value, JobType.STORYBOARD_REVISE.value])
     job = Job(
         project_id=project.id,
         type=JobType.STORYBOARD_REVISE.value,

@@ -14,7 +14,7 @@ AudioMode = Literal["narrated", "dialogue"]
 # ---------------------------------------------------------------------------
 
 class StoryboardScene(BaseModel):
-    """One scene as produced by Claude during storyboarding."""
+    """One scene as produced by the LLM during storyboarding."""
 
     scene_number: int = Field(ge=1)
     duration_seconds: float = Field(gt=0, le=15)
@@ -42,6 +42,7 @@ class ProjectCreate(BaseModel):
     target_length: Literal[15, 30, 60] = 30
     aspect_ratio: Literal["16:9", "9:16", "1:1"] = "16:9"
     style_preset: str = "cinematic"
+    llm_model: Optional[str] = None  # which LLM handles this project's prompts
 
 
 class SceneUpdate(BaseModel):
@@ -93,8 +94,10 @@ class ProjectOut(BaseModel):
     aspect_ratio: str
     style_preset: str
     status: str
+    llm_model: Optional[str]
     voice_id: Optional[str]
     style_bible: Optional[dict]
+    thumbnail_url: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

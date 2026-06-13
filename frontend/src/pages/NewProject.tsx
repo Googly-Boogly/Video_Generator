@@ -11,11 +11,15 @@ export default function NewProject() {
   const [length, setLength] = useState(30);
   const [aspect, setAspect] = useState("16:9");
   const [preset, setPreset] = useState("cinematic");
+  const [llm, setLlm] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    api.config().then(setConfig);
+    api.config().then((c) => {
+      setConfig(c);
+      setLlm(c.default_llm);
+    });
   }, []);
 
   async function submit(e: React.FormEvent) {
@@ -29,6 +33,7 @@ export default function NewProject() {
         target_length: length,
         aspect_ratio: aspect,
         style_preset: preset,
+        llm_model: llm || undefined,
       });
       // Kick off storyboard generation immediately; the review page polls it.
       await api.generateStoryboard(project.id);
@@ -100,6 +105,31 @@ export default function NewProject() {
               ))}
             </select>
           </div>
+        </div>
+
+        <div>
+          <label className="label">Writer model (LLM)</label>
+          <div className="flex gap-2">
+            {(config?.llms ?? []).map((m) => (
+              <button
+                type="button"
+                key={m.id}
+                onClick={() => setLlm(m.id)}
+                className={`flex-1 rounded-lg py-2 px-3 text-sm border text-left ${
+                  llm === m.id ? "bg-accent text-ink border-accent" : "bg-panel2 border-edge"
+                }`}
+              >
+                <div className="font-medium">{m.label}</div>
+                <div className={`text-[11px] ${llm === m.id ? "text-ink/70" : "text-slate-500"}`}>
+                  {m.provider}{m.vision ? " · vision" : ""}
+                </div>
+              </button>
+            ))}
+          </div>
+          <p className="text-[11px] text-slate-500 mt-1">
+            Handles the storyboard, conversational revisions, and the vision steps (keyframe ranking,
+            quality gate, editor) for this project.
+          </p>
         </div>
 
         {err && <p className="text-sm text-red-400">{err}</p>}

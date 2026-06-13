@@ -49,11 +49,12 @@ def generate_clip(
             image_bytes=keyframe_bytes, duration=duration, aspect_ratio=aspect_ratio
         )
     else:
-        from ..providers import fal_provider
+        from ..providers import generation
 
-        clip = fal_provider.generate_video(
+        clip = generation.generate_video(
             model_id=model_id, prompt=prompt, duration=duration,
-            aspect_ratio=aspect_ratio, image_url=keyframe_url, reference_urls=reference_urls,
+            aspect_ratio=aspect_ratio, image_url=keyframe_url, image_bytes=keyframe_bytes,
+            reference_urls=reference_urls,
         )
 
     # Demux native audio (ambience/Foley) into its own track.

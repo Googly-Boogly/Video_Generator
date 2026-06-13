@@ -30,7 +30,7 @@ class Tier(str, Enum):
 class ModelRoute:
     id: str
     label: str
-    provider: str            # "fal" | "anthropic" | "elevenlabs"
+    provider: str            # "fal" | "google"
     fal_id: Optional[str]    # slug for fal-client, when provider == "fal"
     modality: Modality
     tier: Tier
@@ -44,6 +44,7 @@ class ModelRoute:
     lip_sync: bool = False
     max_clip_seconds: float = 10.0
     notes: str = ""
+    google_id: Optional[str] = None  # model id when provider == "google"
 
 
 # ---------------------------------------------------------------------------
@@ -111,8 +112,9 @@ MODEL_ROUTES: dict[str, ModelRoute] = {
     "veo-31": ModelRoute(
         id="veo-31",
         label="Veo 3.1",
-        provider="fal",
-        fal_id="fal-ai/veo/v3.1",
+        provider="google",
+        fal_id=None,
+        google_id="veo-3.1-generate-preview",
         modality=Modality.TEXT_TO_VIDEO,
         tier=Tier.PREMIUM,
         prompt_style="veo",
@@ -121,13 +123,14 @@ MODEL_ROUTES: dict[str, ModelRoute] = {
         native_audio=True,
         lip_sync=True,
         max_clip_seconds=8.0,
-        notes="Native synchronized audio + lip-synced speech, 4K. Dialogue scenes.",
+        notes="Google direct. Native synchronized audio + lip-synced speech, 4K. Dialogue scenes.",
     ),
     "veo-31-lite": ModelRoute(
         id="veo-31-lite",
         label="Veo 3.1 Lite",
-        provider="fal",
-        fal_id="fal-ai/veo/v3.1/lite",
+        provider="google",
+        fal_id=None,
+        google_id="veo-3.1-fast-generate-preview",
         modality=Modality.TEXT_TO_VIDEO,
         tier=Tier.DRAFT,
         prompt_style="veo",
@@ -135,7 +138,7 @@ MODEL_ROUTES: dict[str, ModelRoute] = {
         native_audio=True,
         lip_sync=True,
         max_clip_seconds=8.0,
-        notes="Draft tier hero shots.",
+        notes="Google direct, draft tier hero shots.",
     ),
     "seedance-2": ModelRoute(
         id="seedance-2",

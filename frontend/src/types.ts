@@ -29,8 +29,10 @@ export interface Project {
   aspect_ratio: string;
   style_preset: string;
   status: string;
+  llm_model?: string | null;
   voice_id: string | null;
   style_bible: StyleBible | null;
+  thumbnail_url?: string | null;
   created_at: string;
   updated_at: string;
   scenes?: Scene[];
@@ -90,6 +92,13 @@ export interface ModelInfo {
   notes: string;
 }
 
+export interface LLMInfo {
+  id: string;
+  label: string;
+  provider: string;
+  vision: boolean;
+}
+
 export interface AppConfig {
   mock_generation: boolean;
   style_presets: string[];
@@ -97,6 +106,8 @@ export interface AppConfig {
   aspect_ratios: string[];
   models: ModelInfo[];
   video_models: string[];
+  llms: LLMInfo[];
+  default_llm: string;
 }
 
 export interface CostEstimate {

@@ -28,7 +28,8 @@ class ReferenceImage:
 _ROLES = ["character", "environment", "colorkey"]
 
 
-def generate_style_bible(*, idea: str, style_preset: str, aspect_ratio: str) -> dict:
+def generate_style_bible(*, idea: str, style_preset: str, aspect_ratio: str,
+                         llm: str | None = None) -> dict:
     """Produce the locked style document (reference-image *prompts* included)."""
     if settings.mock_generation:
         return mock.mock_style_bible(idea, style_preset)
@@ -38,6 +39,7 @@ def generate_style_bible(*, idea: str, style_preset: str, aspect_ratio: str) -> 
         user=prompts.style_bible_user_prompt(
             idea=idea, style_preset=style_preset, aspect_ratio=aspect_ratio
         ),
+        llm=llm,
     )
 
 

@@ -1,4 +1,4 @@
-"""Prompt engineering: Claude system prompts + the per-model prompt translator.
+"""Prompt engineering: LLM system prompts + the per-model prompt translator.
 
 Kling, Veo, and Seedance respond to very different prompt phrasing. The
 translator rewrites a neutral scene description into the dialect each target

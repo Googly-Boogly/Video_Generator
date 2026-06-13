@@ -15,7 +15,8 @@ app/
   state.py         status enums + ordering
   models_config.py model routing table + resolve_video_model()
   cost.py          pre-flight estimate + actual-spend ledger (CostEntry)
-  llm.py           Anthropic wrapper (complete_json, rank_images vision)
+  llm.py           provider-agnostic LLM dispatch (OpenAI + Anthropic)
+  llm_config.py    LLM routing table (gpt-5.4-nano, claude-haiku-4-6)
   storage.py       MinIO/S3 helper
   asset_store.py   store_asset(): put bytes in MinIO + create the Asset row
   media.py         FFmpeg: encode/demux/extract, synth music, assemble_video (render EDL)
@@ -33,7 +34,7 @@ tests/             unit + API integration (SQLite + eager Celery)
 
 ```bash
 # Via compose (recommended): see ../README.md
-docker compose exec api python -m pytest -q       # 60 tests (uses FFmpeg + librosa)
+docker compose exec api python -m pytest -q       # 67 tests (uses FFmpeg + librosa)
 
 # Standalone uvicorn (needs Postgres/Redis/MinIO reachable):
 uvicorn app.main:app --reload

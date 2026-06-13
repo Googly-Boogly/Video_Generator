@@ -1,10 +1,30 @@
 # Model routing, pricing & prompt translation
 
-Everything model-related is config in `backend/app/models_config.py`. The pipeline
-references models only by their **internal id**, so swapping providers/models is a
-config change, never a refactor. The same table feeds the cost estimator.
+Everything model-related is config in `backend/app/models_config.py` (generation
+models) and `backend/app/llm_config.py` (LLMs). The pipeline references models only
+by their **internal id**, so swapping providers/models is a config change, never a
+refactor. The same tables feed the cost estimator and the UI pickers.
 
-## Routing table (SOTA as of June 2026)
+## LLM routing (`llm_config.py`)
+
+The text/vision LLM is **provider-agnostic and selectable per project** — pick it on
+the New Project form ("Writer model"); it handles the storyboard, conversational
+revisions, keyframe ranking, the quality gate, and the editor EDL for that project.
+
+| Internal id | Label | Provider | Model id | Vision |
+| --- | --- | --- | --- | --- |
+| `gpt-5.4-nano` | GPT-5.4 nano | openai | `gpt-5.4-nano` | ✓ |
+| `claude-haiku-4-6` | Claude Haiku 4.6 | anthropic | `claude-haiku-4-6` | ✓ |
+
+- Default is `DEFAULT_LLM` (env, defaults to `gpt-5.4-nano`); a project stores its
+  choice in `projects.llm_model`.
+- `llm.py` dispatches by provider: OpenAI uses Chat Completions JSON mode; Anthropic
+  uses the Messages API. Image parts are converted between the two formats
+  automatically, so vision calls work the same on either.
+- Add a model by adding an `LLMRoute` — no pipeline changes needed.
+- Going live needs the matching key(s): `OPENAI_API_KEY` and/or `ANTHROPIC_API_KEY`.
+
+## Generation routing table (SOTA as of June 2026)
 
 | Internal id | Label | Modality | Tier | fal slug | Price | Refs | Native audio | Lip-sync | Max clip |
 | ----------- | ----- | -------- | ---- | -------- | ----- | ---- | ------------ | -------- | -------- |

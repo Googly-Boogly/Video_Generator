@@ -36,7 +36,7 @@ in `backend/app/main.py` in sync.
 `MOCK_GENERATION=true` (default in `.env`) makes every generation stage return
 instant placeholder assets (solid-color PNGs, silent WAVs) with **zero API spend**.
 This is how the whole pipeline + UI run without keys. Real provider calls
-(`fal-client`, Anthropic, ElevenLabs) only fire when it's `false` + keys are set.
+(`fal-client`, OpenAI/Anthropic, ElevenLabs) only fire when it's `false` + keys are set.
 **Every new stage must keep a mock path.**
 
 Note: "mock" means *don't pay an AI model* — local media work still runs for real.
@@ -49,7 +49,7 @@ the FFmpeg path is exercised. FFmpeg is in the backend image; Phase 3 tests use 
 ```bash
 docker compose up --build              # start everything
 docker compose restart worker          # REQUIRED after editing tasks.py (Celery has no hot-reload)
-docker compose exec api python -m pytest -q     # 60 tests, FFmpeg+librosa in image
+docker compose exec api python -m pytest -q     # 67 tests, FFmpeg+librosa in image
 docker compose exec frontend npm run build      # tsc type-check + prod build
 python scripts/smoke_test.py           # 95 live checks against the running stack
 docker compose logs -f api|worker      # tail logs
@@ -66,8 +66,9 @@ does not** — restart it after changing `tasks.py` or anything it imports.
 - **Generation runs only in Celery tasks** (`app/tasks.py`). HTTP handlers create a
   `Job` row and `.delay()` — never block on generation. Clients poll
   `GET /api/jobs/{id}` or stream `/stream` (SSE).
-- **Model facts are config.** `app/models_config.py` is the single source of truth
-  for model routing, pricing, and capabilities. `resolve_video_model()` decides a
+- **Model facts are config.** `app/models_config.py` (generation) and `app/llm_config.py`
+  (LLMs) are the single source of truth for routing, pricing, and capabilities. A
+  project's LLM is chosen on the New Project form and stored in `projects.llm_model`. `resolve_video_model()` decides a
   scene's model (override > premium suggestion > draft default). Nothing else
   hardcodes model ids or prices.
 - **Pipeline stages are isolated.** One module per stage in `app/pipeline/`, each
@@ -82,7 +83,8 @@ does not** — restart it after changing `tasks.py` or anything it imports.
 ```
 backend/app/
   config.py models.py schemas.py state.py models_config.py cost.py
-  llm.py            Anthropic: complete_json + rank_images (vision)
+  llm.py            provider-agnostic LLM dispatch (OpenAI + Anthropic)
+  llm_config.py     LLM routing table (gpt-5.4-nano, claude-haiku-4-6)
   storage.py        MinIO/S3 helper
   asset_store.py    store_asset(): put bytes in MinIO + create the Asset row
   media.py          FFmpeg: encode/demux/extract, synth music, assemble_video (render EDL)
@@ -104,7 +106,7 @@ Keep all three green under `MOCK_GENERATION=true` (CI must never spend money):
 
 - **pytest** (`backend/tests/`) — unit (`test_pipeline_mock.py`) + API integration
   (`test_api_integration.py`, SQLite + eager Celery + in-memory storage shim).
-  Currently **60 passed**.
+  Currently **67 passed**.
 - **smoke** (`scripts/smoke_test.py`) — **95 checks** against the live stack.
 - **frontend** — `npm run build` must type-check clean (dev mode hides TS errors).
 
@@ -124,6 +126,12 @@ Add a regression test for every behavior you add or bug you fix. See
   `cascade="all, delete-orphan"`; calling `db.delete()` on a child that's still in
   the loaded collection trips the cascade on re-run/rebuild paths (a bug we've hit
   three times). Removing through the collection keeps it consistent.
+- **MinIO cleanup is automatic** via a `before_delete` event on `Asset` — both
+  project-delete cascade and asset replacement delete the backing blob. Always go
+  through `asset_store.store_asset` (it assigns the id explicitly — never build a
+  storage key from `asset.id` before flush; the `default=_uuid` only fires at flush).
+- **Generation endpoints guard against concurrent jobs** via
+  `jobs_util.ensure_no_active_job` (409 if one of that type is already running).
 - Keep `frontend/src/types.ts` in sync with `backend/app/schemas.py`.
 
 ## Docs index

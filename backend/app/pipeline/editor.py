@@ -1,6 +1,6 @@
 """Stage 9: vision-equipped AI editor → Edit Decision List.
 
-Claude receives the storyboard + extracted frames + narration durations + beat
+The vision model receives the storyboard + extracted frames + narration durations + beat
 grid + audio_modes and returns an EDL: clip order, in/out trims (cut mushy clip
 starts/ends), a transition per cut, captions with timestamps, and a per-scene mix
 plan (narration / music / native levels, ducking, narration pauses for dialogue).
@@ -17,7 +17,7 @@ DEFAULT_TRIM = 0.15  # trim mushy clip starts/ends
 
 
 def build_edl(*, project: dict, scenes: list[dict], beat_grid: dict | None = None,
-              frames: list[dict] | None = None) -> dict:
+              frames: list[dict] | None = None, llm: str | None = None) -> dict:
     """Return an Edit Decision List.
 
     `scenes`: ordered dicts {scene_number, duration, audio_mode, native_muted,
@@ -25,7 +25,7 @@ def build_edl(*, project: dict, scenes: list[dict], beat_grid: dict | None = Non
     for the live vision path.
     """
     if not settings.mock_generation and frames:
-        return _vision_edl(project=project, scenes=scenes, beat_grid=beat_grid, frames=frames)
+        return _vision_edl(project=project, scenes=scenes, beat_grid=beat_grid, frames=frames, llm=llm)
 
     cuts, t = [], 0.0
     beats = (beat_grid or {}).get("beats") or []
@@ -66,11 +66,9 @@ def _nearest_beat(t: float, beats: list[float]) -> float | None:
     return round(min(beats, key=lambda b: abs(b - t)), 3)
 
 
-def _vision_edl(*, project, scenes, beat_grid, frames) -> dict:
-    """Live path: Claude vision proposes trims/transitions/captions from frames."""
-    import base64
-    import anthropic
-    from ..llm import _extract_json
+def _vision_edl(*, project, scenes, beat_grid, frames, llm=None) -> dict:
+    """Live path: vision model proposes trims/transitions/captions from frames."""
+    from ..llm import vision_json
 
     system = (
         "You are a film editor. Given the storyboard, sampled frames per scene, "
@@ -83,18 +81,12 @@ def _vision_edl(*, project, scenes, beat_grid, frames) -> dict:
         'bool, "pause_narration_for_dialogue": bool}}]}. Trim mushy clip starts/ends, '
         "snap cuts near beats, and pause narration on dialogue scenes."
     )
-    content: list[dict] = [{"type": "text", "text":
+    text = (
         f"SCENES: {[{k: s.get(k) for k in ('scene_number','duration','audio_mode','narration_text','narration_duration')} for s in scenes]}\n"
         f"BEAT GRID bpm={(beat_grid or {}).get('bpm')} beats={(beat_grid or {}).get('beats')}\n"
-        "Frames follow."}]
-    for fr in frames or []:
-        content.append({"type": "image", "source": {"type": "base64",
-                        "media_type": "image/jpeg",
-                        "data": base64.standard_b64encode(fr["bytes"]).decode()}})
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-    resp = client.messages.create(model=settings.anthropic_vision_model, max_tokens=4096,
-                                  system=system, messages=[{"role": "user", "content": content}])
-    text = "".join(b.text for b in resp.content if b.type == "text")
-    edl = _extract_json(text)
+        "The frames (in scene order) follow."
+    )
+    images = [(fr["bytes"], "image/jpeg") for fr in (frames or [])]
+    edl = vision_json(system=system, text=text, images=images, max_tokens=4096, llm=llm)
     edl["engine"] = "vision"
     return edl

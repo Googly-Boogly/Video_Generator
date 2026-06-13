@@ -35,7 +35,9 @@ def _asset_out(a: Asset) -> AssetOut:
 
 def _enqueue(db: Session, project: Project, tier: str, scene_id: str | None) -> Job:
     from ..tasks import generate_video_task
+    from ..jobs_util import ensure_no_active_job
 
+    ensure_no_active_job(db, project.id, [JobType.VIDEO.value])
     job = Job(project_id=project.id, type=JobType.VIDEO.value,
               status=JobStatus.QUEUED.value, scene_id=scene_id)
     db.add(job)

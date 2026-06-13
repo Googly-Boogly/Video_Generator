@@ -11,6 +11,7 @@ _db_fd, _db_path = tempfile.mkstemp(suffix=".sqlite")
 os.environ.update(
     MOCK_GENERATION="true",
     DATABASE_URL=f"sqlite:///{_db_path}",
+    OPENAI_API_KEY="",
     ANTHROPIC_API_KEY="",
     FAL_KEY="",
     ELEVENLABS_API_KEY="",
@@ -33,7 +34,14 @@ _MEM: dict[str, bytes] = {}
 storage_mod.put_bytes = lambda key, data, content_type="application/octet-stream": (_MEM.__setitem__(key, data) or key)
 storage_mod.get_bytes = lambda key: _MEM[key]
 storage_mod.public_url = lambda key, expires=3600: f"memory://{key}"
+storage_mod.delete_object = lambda key: _MEM.pop(key, None)
 storage_mod.ensure_bucket = lambda: None
+
+
+@pytest.fixture()
+def storage_mem():
+    """The in-memory blob store, for asserting MinIO cleanup."""
+    return _MEM
 
 
 @pytest.fixture(scope="session", autouse=True)
