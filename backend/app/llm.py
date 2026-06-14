@@ -45,7 +45,7 @@ def _openai_json(route: LLMRoute, *, system: str, user_parts: list[dict], max_to
         raise LLMError("OPENAI_API_KEY not set (and mock mode is off).")
     from openai import OpenAI
 
-    client = OpenAI(api_key=settings.openai_api_key)
+    client = OpenAI(api_key=settings.openai_api_key, max_retries=5)
     resp = client.chat.completions.create(
         model=route.model,
         messages=[
@@ -55,7 +55,13 @@ def _openai_json(route: LLMRoute, *, system: str, user_parts: list[dict], max_to
         response_format={"type": "json_object"},
         max_completion_tokens=max_tokens,
     )
-    return _extract_json(resp.choices[0].message.content or "")
+    choice = resp.choices[0]
+    if choice.finish_reason == "length":
+        raise LLMError(
+            f"LLM response hit max_completion_tokens={max_tokens} and was truncated "
+            "(JSON incomplete). Raise the token budget or shorten the prompt output."
+        )
+    return _extract_json(choice.message.content or "")
 
 
 def _anthropic_json(route: LLMRoute, *, system: str, user_parts: list[dict], max_tokens: int) -> Any:
@@ -63,13 +69,18 @@ def _anthropic_json(route: LLMRoute, *, system: str, user_parts: list[dict], max
         raise LLMError("ANTHROPIC_API_KEY not set (and mock mode is off).")
     import anthropic
 
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    client = anthropic.Anthropic(api_key=settings.anthropic_api_key, max_retries=5)
     resp = client.messages.create(
         model=route.model,
         max_tokens=max_tokens,
         system=system + "\n\nReturn ONLY valid JSON, no prose.",
         messages=[{"role": "user", "content": _to_anthropic_parts(user_parts)}],
     )
+    if resp.stop_reason == "max_tokens":
+        raise LLMError(
+            f"LLM response hit max_tokens={max_tokens} and was truncated "
+            "(JSON incomplete). Raise the token budget or shorten the prompt output."
+        )
     text = "".join(b.text for b in resp.content if b.type == "text")
     return _extract_json(text)
 

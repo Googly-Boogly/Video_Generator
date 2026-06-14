@@ -39,15 +39,25 @@ export default function Keyframes() {
   const startPolling = useCallback(() => {
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = window.setInterval(async () => {
-      const sc = await loadAll();
-      const active = sc?.some((s) => s.status === "queued" || s.status === "generating");
+      await loadAll();
+      // The keyframes task commits atomically at the very end (minutes later), so
+      // scene statuses don't reflect "generating" mid-run. Track the JOB instead:
+      // keep polling while a keyframes job is queued/running, stop once it settles.
+      let active = false;
+      if (id) {
+        const jobs = await api.jobsForProject(id);
+        active = jobs.some(
+          (j) => j.type === "keyframes" && (j.status === "queued" || j.status === "running")
+        );
+      }
       if (!active && pollRef.current) {
         clearInterval(pollRef.current);
         pollRef.current = null;
         setBusy(false);
+        await loadAll(); // final refresh so the finished keyframes render
       }
-    }, 1000);
-  }, [loadAll]);
+    }, 2000);
+  }, [id, loadAll]);
 
   useEffect(() => {
     (async () => {

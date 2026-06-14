@@ -43,6 +43,8 @@ Rules:
   speaking. Only use audio_mode "dialogue" when a character must visibly speak on camera;
   then set dialogue_text and keep narration_text empty for that scene.
 - image_prompt describes a single still keyframe. video_prompt describes the motion.
+- Keep image_prompt and video_prompt concise: one to two sentences of scene content
+  plus the embedded style descriptors. Never write multi-paragraph prompts.
 - camera_movement is a short phrase (e.g. "slow push in", "handheld tracking left").
 - suggested_model is one of the provided model ids, chosen per scene.
 
@@ -62,7 +64,56 @@ Output ONLY this JSON shape, no prose:
       "suggested_model": "kling-3-pro"
     }
   ]
-}"""
+}
+
+--- WORKED EXAMPLE (study the format and quality; do NOT reuse its content) ---
+EXAMPLE INPUT:
+IDEA: A deep-sea diver discovers a sunken city
+TARGET LENGTH: 12 seconds
+ASPECT RATIO: 16:9
+STYLE PRESET: cinematic
+STYLE BIBLE (locked):
+STYLE: desaturated teal noir, volumetric haze
+PALETTE: teal, charcoal, amber
+LIGHTING: shafting caustic god-rays from above
+LENS: 24mm wide, shallow depth of field
+CHARACTERS (locked): Mara: weathered diver, scarred dry-suit, copper helmet
+AVAILABLE MODEL IDS for suggested_model: kling-3-pro, veo-31, seedance-2
+
+EXAMPLE OUTPUT:
+{
+  "scenes": [
+    {
+      "scene_number": 1,
+      "duration_seconds": 6,
+      "shot_description": "Mara sinks past a colossal drowned archway into a ruined plaza",
+      "camera_movement": "slow vertical descent, slight push in",
+      "image_prompt": "Wide underwater shot of a diver descending past a colossal stone archway into a sunken plaza. desaturated teal noir, volumetric haze; palette teal, charcoal, amber; shafting caustic god-rays from above; 24mm wide, shallow depth of field. Mara: weathered diver, scarred dry-suit, copper helmet.",
+      "video_prompt": "Diver drifts downward through suspended silt as god-rays sweep over crumbling columns; gentle current sways kelp. desaturated teal noir, volumetric haze; palette teal, charcoal, amber; shafting caustic god-rays from above; 24mm wide.",
+      "narration_text": "Three hundred meters down, the city no one believed in was waiting.",
+      "audio_mode": "narrated",
+      "dialogue_text": null,
+      "suggested_model": "kling-3-pro"
+    },
+    {
+      "scene_number": 2,
+      "duration_seconds": 6,
+      "shot_description": "Mara's helmet lamp catches a carved face; she speaks into her comm, breath ragged",
+      "camera_movement": "handheld tracking right, slow",
+      "image_prompt": "Close on a diver's copper helmet, beam raking across a barnacled carved stone face. desaturated teal noir, volumetric haze; palette teal, charcoal, amber; shafting caustic god-rays from above; 24mm wide, shallow depth of field. Mara: weathered diver, scarred dry-suit, copper helmet.",
+      "video_prompt": "Helmet lamp sweeps over the carving, particulate drifting through the beam as Mara turns toward camera to speak. desaturated teal noir, volumetric haze; palette teal, charcoal, amber; shafting caustic god-rays from above; 24mm wide.",
+      "narration_text": "",
+      "audio_mode": "dialogue",
+      "dialogue_text": "Base, are you seeing this? It's... it's looking back.",
+      "suggested_model": "veo-31"
+    }
+  ]
+}
+Note how the example: keeps total duration within 2s of target (6+6=12); embeds every
+style descriptor verbatim into both image_prompt and video_prompt; uses a narrated scene
+plus one dialogue scene (narration_text empty, dialogue_text set); and picks suggested_model
+per scene only from the provided ids. Match this rigor for the REAL idea below.
+--- END EXAMPLE ---"""
 
 
 def storyboard_user_prompt(

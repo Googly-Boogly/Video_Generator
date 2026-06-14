@@ -39,7 +39,7 @@ def generate_storyboard(
                 style_bible=style_bible,
                 available_models=_available_video_model_ids(),
             ),
-            max_tokens=8192,
+            max_tokens=100_000,
             llm=llm,
         )
     return _validate(raw)
@@ -58,13 +58,24 @@ def revise_storyboard(
             user=prompts.revise_user_prompt(
                 instruction=instruction, storyboard=storyboard, style_bible=style_bible
             ),
-            max_tokens=8192,
+            max_tokens=100_000,
             llm=llm,
         )
     return _validate(raw)
 
 
 def _validate(raw: dict) -> Storyboard:
+    # LLMs occasionally emit out-of-range or non-numeric durations (e.g. 0). Clamp
+    # each scene into the allowed per-scene range BEFORE validation so one bad number
+    # never fails the whole storyboard.
+    scenes = raw.get("scenes", []) if isinstance(raw, dict) else []
+    for s in scenes:
+        if isinstance(s, dict):
+            try:
+                d = float(s.get("duration_seconds"))
+            except (TypeError, ValueError):
+                d = 4.0
+            s["duration_seconds"] = min(max(d, 2.0), 8.0)
     sb = Storyboard.model_validate(raw)
     # Re-number contiguously and backfill suggested_model.
     for i, scene in enumerate(sb.scenes, start=1):
