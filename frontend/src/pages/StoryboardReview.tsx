@@ -16,6 +16,7 @@ export default function StoryboardReview() {
   const [generating, setGenerating] = useState(false);
   const [instruction, setInstruction] = useState("");
   const [revising, setRevising] = useState(false);
+  const [refiningAI, setRefiningAI] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pollRef = useRef<number | null>(null);
 
@@ -148,6 +149,32 @@ export default function StoryboardReview() {
     refreshCost(id);
   }
 
+  async function refineWithAI() {
+    if (!id) return;
+    const hasDownstream = scenes.some((s) => s.keyframe_asset_id || s.clip_asset_id);
+    if (
+      hasDownstream &&
+      !window.confirm(
+        "Refining regenerates the scenes and discards the keyframes and clips you've " +
+          "already generated for this project. Continue?"
+      )
+    )
+      return;
+    setRefiningAI(true);
+    setError(null);
+    try {
+      const job = await api.refineStoryboard(id);
+      const final = await pollJob(job.id);
+      if (final.status === "failed") throw new Error(final.error ?? "refine failed");
+      await load();
+      refreshCost(id);
+    } catch (e: any) {
+      setError(e.message ?? "Refine failed");
+    } finally {
+      setRefiningAI(false);
+    }
+  }
+
   const totalDuration = scenes.reduce((a, s) => a + s.duration_seconds, 0);
   const sb = project?.style_bible;
   const ordered = [...scenes].sort((a, b) => a.scene_number - b.scene_number);
@@ -197,6 +224,14 @@ export default function StoryboardReview() {
           )}
           <button className="btn-ghost" onClick={regenerateAll} disabled={generating}>
             ↻ Regenerate storyboard
+          </button>
+          <button
+            className="btn-ghost"
+            onClick={refineWithAI}
+            disabled={refiningAI || generating || revising}
+            title="Multi-agent critique + refine of the storyboard and narration"
+          >
+            {refiningAI ? "Refining…" : "✨ Refine with AI"}
           </button>
         </div>
       </div>

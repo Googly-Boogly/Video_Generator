@@ -143,9 +143,9 @@ Failures raise `FFmpegError`. Tested directly in `tests/test_media.py`.
 | `llm_config.py` | LLM routing table (`gpt-5.4-nano`, `claude-haiku-4-6`) + `llm_route()` |
 | `storage.py` | MinIO/S3 helper (`put_bytes`, `get_bytes`, `public_url`) |
 | `asset_store.py` | Shared `store_asset()` — put bytes in MinIO + create the `Asset` row |
-| `jobs_util.py` | `ensure_no_active_job()` — concurrent-job guard (409) |
+| `jobs_util.py` | `ensure_project_idle()` — one generation job per project (409); `fail_orphaned_jobs()` clears jobs stuck >30 min on worker boot |
 | `media.py` | FFmpeg: encode clip, demux native audio, extract frames, synth music bed, **assemble_video** (render the EDL) |
-| `providers/` | `fal_provider` (image/video), `elevenlabs_provider` (TTS/voices) — behind the mock flag |
+| `providers/` | `fal_provider` (image/video), `google_provider` (Veo, parked), `generation` (video dispatch), `elevenlabs_provider` (TTS/voices) — behind the mock flag |
 | `celery_app.py` | Celery app + config |
 | `tasks.py` | Celery tasks (the only place generation runs) |
 | `pipeline/` | One module per stage — independently testable |

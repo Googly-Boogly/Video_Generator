@@ -31,11 +31,18 @@ Source is bind-mounted, so both servers hot-reload:
 - Frontend: Vite HMR (polling enabled for Docker)
 
 The **Celery worker does not hot-reload** — after editing `tasks.py` or anything it
-imports, run `docker compose restart worker`.
+imports, run `docker compose restart worker`. **But never restart the worker while a
+generation job is running:** `task_acks_late` re-queues the in-flight task and the fresh
+worker re-runs it (re-spending on providers). To truly stop a stuck/runaway task:
+`docker compose kill worker` → `docker compose exec redis redis-cli FLUSHALL` →
+`docker compose up -d worker`. Also: only one generation job runs per project at a time
+(`jobs_util.ensure_project_idle` → HTTP 409); the worker clears jobs stuck >30 min on boot.
 
-**Adding a Python dependency** (e.g. librosa in Phase 4) requires an image rebuild:
-`docker compose build api worker && docker compose up -d api worker`. The backend
-image ships FFmpeg, `libsndfile1` (for librosa/soundfile), and `pytest`.
+**Adding a Python dependency** (e.g. librosa, or **CrewAI** for the refine crew) requires
+an image rebuild: `docker compose build api worker && docker compose up -d api worker`.
+The backend image ships FFmpeg, `libsndfile1` (for librosa/soundfile), `crewai` (multi-agent
+refine), and `pytest`. CrewAI is lazy-imported in `pipeline/refine.py`, so mock mode and the
+test suite don't require it.
 
 ## Common commands
 

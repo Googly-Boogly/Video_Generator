@@ -122,6 +122,14 @@ Removes the scene and re-numbers contiguously.
 `{ "instruction": "make scene 3 moodier" }` (≥2 chars). Kicks off a LLM revision
 task that patches the whole storyboard. Returns a `Job`.
 
+### `POST …/scenes/refine` → 202
+No body. Kicks off the **multi-agent (CrewAI) refine** task — a crew (Story Editor,
+Narration Writer, Cinematographer, Continuity/Pacing, Music Director, Fact-checker +
+Showrunner) critiques and rewrites the storyboard/narration, then replaces the scenes.
+Uses the project's LLM. No-op in mock mode; falls back to the original storyboard on any
+failure. Music Director's bed pick is stored on `style_bible.music_suggestion`. Returns a
+`Job`. **409** if another generation job is active for the project.
+
 ---
 
 ## Keyframes & reference images (Phase 2)

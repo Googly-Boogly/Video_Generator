@@ -99,9 +99,47 @@ built before any real provider is wired.
   download/export; project history (Home) with "▶ watch".
 - Tests: 60 pytest + 95-check live smoke.
 
+## ✅ Phase 7 — Photo-to-video pivot + AI refine (done)
+
+A focused simplification + a quality pass on the creative output:
+
+- **Photo-to-video only.** Every scene animates its winning keyframe via an
+  **image-to-video** model (Kling); `resolve_video_model` now guarantees an i2v model
+  and falls back to the tier's Kling default if a suggested model is text-to-video.
+  **Lip-synced dialogue (Veo) is removed** — storyboards are narrated-only; Veo routes
+  are parked but never selected.
+- **One keyframe per scene** (`KEYFRAME_VARIANTS = 1`) — best-of-N + vision ranking is
+  off by default (ranking short-circuits for a single variant). Bump the constant to
+  re-enable.
+- **Single continuous narration track.** Per-scene narration lines are concatenated
+  back-to-back (one voiceover, decoupled from scene timing) instead of delayed to each
+  scene offset — fixes narrators talking over each other.
+- **AI refine crew (CrewAI).** A user-triggered "Refine with AI" pass: Story Editor,
+  Narration Writer, Cinematographer, Continuity/Pacing, Music Director, Fact-checker +
+  a Showrunner that emits corrected storyboard JSON. Mock-gated; falls back to the
+  original storyboard on any failure. `pipeline/refine.py`, `POST /scenes/refine`.
+- **Provider/robustness fixes:** corrected all fal/Google model ids; keyframe bytes
+  uploaded to fal for i2v (local MinIO URLs aren't reachable); per-model prompt cap +
+  duration snap (Kling 5/10s); render survives video-only clips (synth silence);
+  storyboard token budget 100k + truncation guard + duration clamp; project-wide
+  concurrency guard (`ensure_project_idle`); stale-only orphan-job recovery (>30 min);
+  generate-then-replace so a failed regenerate never wipes good clips.
+
+## Open TODOs
+
+- **Real music.** The music bed is currently **synthesized** from a tiny built-in
+  library (`audio.MUSIC_LIBRARY` → `media.synth_music`), and the Music Director agent
+  only *recommends* one of those ids. We need **real music** — license a stock-music
+  API, integrate a music-generation provider (e.g. a text-to-music model), and/or
+  allow user upload as the primary path. Wire the Music Director's pick (stored on
+  `style_bible.music_suggestion`) through to the audio stage automatically.
+- **Refine cost metering** is a flat estimate — add per-token pricing to `llm_config`
+  and record real CrewAI token usage.
+
 ### Possible future refinements
 - Overlapping crossfade (xfade) instead of dip-to-black; cost ceilings/alerts;
-  multi-project cost rollup; richer history page.
+  multi-project cost rollup; richer history page; incremental per-scene commit during
+  long keyframe/video jobs (so the UI fills in progressively).
 
 ---
 

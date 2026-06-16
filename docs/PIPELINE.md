@@ -5,8 +5,13 @@ Real provider calls run only when `MOCK_GENERATION=false`; otherwise each stage
 returns instant placeholder output (see [Mock mode](#mock-mode)).
 
 ```
-style_bible → storyboard → keyframes → video → quality → audio → editor → assemble
+style_bible → storyboard → (refine) → keyframes → video → quality → audio → editor → assemble
 ```
+
+This is a **photo-to-video, narrated-only** pipeline: every scene animates its winning
+keyframe via an image-to-video model (Kling), and all speech is voiceover narration on
+one continuous track. There is no lip-synced on-camera dialogue. The optional **refine**
+step is a user-triggered multi-agent (CrewAI) critique/rewrite of the storyboard.
 
 ## Stages
 
@@ -16,8 +21,9 @@ style_bible → storyboard → keyframes → video → quality → audio → edi
 | 2 | Style bible + reference images | `style_bible.py` | ✅ 1–2 | Locked palette/lighting/lens + character sheet; 3–5 master reference images (character/environment/color-key) via FLUX.2 |
 | 3 | Storyboard | `storyboard.py` | ✅ 1 | Validated `scenes[]` (see schema below) |
 | 4 | Storyboard review | (API + UI) | ✅ 1 | Human-edited storyboard; conversational revision |
-| 5 | Keyframes (best-of-N) | `keyframes.py` | ✅ 2 | 3× FLUX.2 variants/scene with refs attached + the vision model ranked winner; user can override |
-| 6 | Video generation | `video.py` | ✅ 3 | One clip/scene via the routed model (tier-aware) + demuxed native audio |
+| 4b | AI refine (multi-agent) | `refine.py` | ✅ 7 | Optional, user-triggered CrewAI crew critiques + rewrites the storyboard/narration |
+| 5 | Keyframes | `keyframes.py` | ✅ 2 | 1 FLUX.2 keyframe/scene with refs attached (`KEYFRAME_VARIANTS=1`; best-of-N + ranking off by default) |
+| 6 | Video generation | `video.py` | ✅ 3 | One image-to-video clip/scene (Kling, keyframe-driven) + demuxed native audio |
 | 7 | Quality gate | `quality.py` | ✅ 3 | 4 frames/clip + the vision model artifact/identity flags + garbled-speech auto-mute |
 | 8 | Audio build | `audio.py` | ✅ 4 | ElevenLabs narration (locked voice), music bed + librosa beat grid, native-track mix plan |
 | 9 | AI editor | `editor.py` | ✅ 5 | Edit Decision List (order, trims, transitions, captions, beat-snap, mix plan) |
@@ -43,9 +49,9 @@ generator — against `schemas.Storyboard` before the rest of the system trusts 
       "camera_movement": "slow push in",
       "image_prompt": "...",        // single keyframe
       "video_prompt": "...",        // motion
-      "narration_text": "...",
-      "audio_mode": "narrated",     // "narrated" | "dialogue"
-      "dialogue_text": null,        // set only when audio_mode == "dialogue"
+      "narration_text": "...",      // concatenated across scenes into ONE voiceover track
+      "audio_mode": "narrated",     // always "narrated" (photo-to-video, no lip-sync)
+      "dialogue_text": null,        // always null
       "suggested_model": "kling-3-pro"
     }
   ]
@@ -54,7 +60,23 @@ generator — against `schemas.Storyboard` before the rest of the system trusts 
 
 Validation also re-numbers scenes contiguously and backfills `suggested_model`.
 
-## Keyframes: reference images + best-of-N (Phase 2)
+## Refine (multi-agent, CrewAI) — optional, user-triggered
+
+```
+refine_storyboard_task(project_id)            POST …/scenes/refine
+  └─ pipeline/refine.py: a CrewAI crew critiques + rewrites the storyboard
+        Story Editor · Narration Writer · Cinematographer · Continuity/Pacing ·
+        Music Director · Fact-checker → Showrunner emits corrected storyboard JSON
+     → validate + clamp → replace scenes; Music Director pick stored on
+       style_bible.music_suggestion
+```
+
+- **Runs only on demand** ("✨ Refine with AI" on the review page), via the project's
+  LLM. **Mock-gated** (no-op, zero spend in mock mode); CrewAI is lazy-imported.
+- **Safe by construction:** any crew failure / unparseable output falls back to the
+  original storyboard, so refining can never corrupt a good storyboard.
+
+## Keyframes: reference images (Phase 2)
 
 ```
 generate_keyframes_task(project_id, [scene_id])
@@ -63,18 +85,17 @@ generate_keyframes_task(project_id, [scene_id])
   │     roles: character / environment / colorkey
   ├─ per scene (failure isolated → scene.status=failed, others continue):
   │     ├─ scene.status=generating
-  │     ├─ 3× FLUX.2 variants, reference images attached  (kind=keyframe assets)
-  │     ├─ the vision model ranks → winner + per-variant {score, reason}
+  │     ├─ 1× FLUX.2 keyframe, reference images attached  (kind=keyframe asset)
   │     ├─ scene.keyframe_asset_id = winner, scene.status=done
   └─ project.status = keyframes
 ```
 
 - **Reference images are the consistency mechanism:** the master references are
-  passed as reference-image inputs to every FLUX.2 keyframe (and, later, every
-  Seedance reference-to-video call), so characters/style stay locked across shots.
-- **Best-of-N:** only the winner is animated in Phase 3. The auto-rank is a
-  starting point — the user can pick a different variant in the selection UI
-  (`POST …/scenes/{id}/keyframe/select`), which flips the `is_winner` flags.
+  passed as reference-image inputs to every FLUX.2 keyframe, so characters/style stay
+  locked across shots.
+- **One keyframe per scene** (`KEYFRAME_VARIANTS=1`): best-of-N + vision ranking is off
+  by default (ranking short-circuits to "winner 0"). Bump the constant to re-enable
+  multiple variants + the selection UI (`POST …/scenes/{id}/keyframe/select`).
 - **Regenerate** re-runs a single scene (fresh variants), or the whole project.
 - Assets are served to the browser via a backend proxy
   (`GET /api/assets/{id}/content`) — no MinIO credentials reach the client.
@@ -85,10 +106,10 @@ generate_keyframes_task(project_id, [scene_id])
 generate_video_task(project_id, tier="draft", [scene_id])
   ├─ per scene (failure isolated → scene.status=failed, others continue):
   │     ├─ require winning keyframe (else fail this scene)
-  │     ├─ scene.status=generating; clear old clip/native/frame assets
-  │     ├─ resolve model (override > premium suggestion > draft default);
-  │     │     dialogue → lip-sync model with dialogue_text in the prompt
-  │     ├─ generate clip (kind=clip)  ── mock: FFmpeg-encode the keyframe
+  │     ├─ scene.status=generating
+  │     ├─ resolve model → always image-to-video (Kling); keyframe uploaded to fal
+  │     ├─ generate clip FIRST, then replace old clip/native/frame assets
+  │     │     (a failed regenerate never wipes the existing clip)  ── mock: FFmpeg-encode the keyframe
   │     ├─ demux native audio (kind=native_audio)
   │     ├─ quality gate: extract 4 frames (kind=frame) → the vision model verdict
   │     │     {flagged, reasons, identity_drift}; garble check → auto-mute native
@@ -97,9 +118,11 @@ generate_video_task(project_id, tier="draft", [scene_id])
   └─ project.status = clips
 ```
 
-- **Tier-aware routing:** `?tier=draft` uses budget models, `?tier=premium` uses
-  the premium suggestion. Per-scene `model_override` always wins. (Phase 5 will
-  re-render hero scenes at premium for the final cut.)
+- **Photo-to-video, always:** `resolve_video_model` guarantees an image-to-video
+  (Kling) model — a text-to-video suggestion (Veo/Seedance) falls back to the tier's
+  Kling default. The winning keyframe is **uploaded to fal** as the `image_url` (local
+  MinIO URLs aren't reachable from fal). Tier-aware: `?tier=draft` (kling-25-turbo) /
+  `?tier=premium` (kling-3-pro); per-scene `model_override` wins if it's also i2v.
 - **Native audio per clip:** every clip's audio track is demuxed into its own
   asset so it can be leveled independently in Phase 4 (15–30% under narration).
   If the garble check trips, the native track is auto-muted (`meta.muted=true`).
@@ -112,11 +135,14 @@ generate_video_task(project_id, tier="draft", [scene_id])
 ```
 build_audio_task(project_id, [scene_id])
   ├─ ensure the music bed's beat grid (librosa) if a bed is chosen
-  └─ per narrated scene (dialogue scenes skipped — native audio carries speech):
-        ElevenLabs TTS with Project.voice_id  ── mock: silent WAV sized to text
+  └─ per scene: ElevenLabs TTS with Project.voice_id  ── mock: silent WAV sized to text
         → narration asset (kind=narration) {voice_id, duration, chars}
   → project.status = audio
 ```
+
+> Per-scene narration assets are still produced (so the Audio page can review/regenerate
+> per scene), but at **render** they are concatenated into ONE continuous voiceover track
+> (see below) — never delayed to scene offsets, so voices never overlap.
 
 - **Voice is locked per project** (`Project.voice_id`, default `voice_aria`). Set
   via `POST …/voice`. Narration carries the words; native model audio is never the
@@ -141,18 +167,20 @@ build_edl_task → editor.build_edl(scenes, beat_grid)
    → project.edl, status = edited
 
 render_task(final) → assemble.render → media.assemble_video (FFmpeg)
-   ├─ final only: regenerate hero scenes (dialogue + flagged) at premium tier
+   ├─ final only: regenerate hero scenes (flagged) at premium tier
    ├─ video: trim each clip, scale to 480p/1080p, burn caption, concat, (draft) watermark
-   ├─ audio: native (trim+level, concat) + narration (delay per scene, mix)
+   ├─ audio: native (trim+level, concat; synth silence for video-only clips)
+   │         + narration (ALL lines concatenated into one continuous track, trimmed to length)
    │         + music bed (pad/trim/level) → amix → limiter
    └─ store draft|final asset (replaces prior of that tier); status → draft_rendered|rendered
 ```
 
 - The render is **real FFmpeg in both modes** — the inputs (clips, narration,
   music) are already real, so there's no mock branch.
-- **Hybrid mix realized:** narration at 0 dB delayed to each scene's offset, native
-  audio ducked to −16 dB (0 dB on dialogue, silenced if garble-muted), music bed at
-  −18 dB; a final `alimiter` prevents clipping.
+- **Hybrid mix realized:** one continuous narration track at 0 dB (per-scene lines
+  concatenated back-to-back, padded/trimmed to the film length — never overlapping),
+  native audio ducked to −16 dB (silenced if garble-muted; synthesized silence for any
+  video-only clip), music bed at −18 dB; a final `alimiter` prevents clipping.
 - **Editor signals:** clip durations, narration durations, the librosa beat grid,
   and audio modes. Cuts are beat-snapped (`on_beat`). The live path sends sampled
   frames to the vision model; mock is a deterministic rules EDL from the same signals.
@@ -175,10 +203,9 @@ and the mix plan in `pipeline/editor.py`):
 - **Native model audio** (ambience/Foley/SFX) — demuxed from every generated clip
   into its own track, mixed **15–30% under narration** (`NATIVE_DUCK_DB = -16 dB`).
   It's the only way to get Foley that matches on-screen motion.
-- **On-screen dialogue** — the only case native audio carries speech. That scene
-  uses Veo 3.1 lip-sync (`audio_mode = "dialogue"`), and **narration pauses** over
-  it (`pause_narration_for_dialogue` in the EDL mix plan). Default storyboards
-  avoid on-screen speaking; narration carries the words.
+- **No on-screen dialogue / lip-sync** — this is a photo-to-video pipeline (the
+  keyframe is animated by Kling), so there is no lip-synced speech. All spoken content
+  is voiceover narration. Storyboards are narrated-only.
 - **Quality gate** flags clips whose native audio contains stray/garbled speech →
   that clip's native track is auto-muted.
 

@@ -26,54 +26,62 @@ revisions, keyframe ranking, the quality gate, and the editor EDL for that proje
 
 ## Generation routing table (SOTA as of June 2026)
 
-| Internal id | Label | Modality | Tier | fal slug | Price | Refs | Native audio | Lip-sync | Max clip |
-| ----------- | ----- | -------- | ---- | -------- | ----- | ---- | ------------ | -------- | -------- |
-| `flux2-dev` | FLUX.2 [dev] | text→image | draft | `fal-ai/flux-2/dev` | $0.025/img | 10 | – | – | – |
-| `seedream-5` | Seedream 5.0 | text→image | premium | `fal-ai/seedream/v5` | $0.06/img | 8 | – | – | – |
-| `kling-3-pro` | Kling 3.0 Pro | image→video | premium | `fal-ai/kling-video/v3/pro/image-to-video` | $0.11/s | 1 | ✓ | – | 10s |
-| `kling-25-turbo` | Kling 2.5 Turbo Pro | image→video | draft | `fal-ai/kling-video/v2.5-turbo/pro/image-to-video` | $0.07/s | 1 | ✓ | – | 10s |
-| `veo-31` | Veo 3.1 | text→video | premium | `fal-ai/veo/v3.1` | $0.15/s | 3 | ✓ | ✓ | 8s |
-| `veo-31-lite` | Veo 3.1 Lite | text→video | draft | `fal-ai/veo/v3.1/lite` | $0.05/s | – | ✓ | ✓ | 8s |
-| `seedance-2` | Seedance 2.0 | text→video | premium | `fal-ai/seedance/v2` | $0.12/s | 9 | ✓ | – | 15s |
+| Internal id | Label | Modality | Tier | provider id (fal slug / google id) | Price | Refs | Native audio | Max clip |
+| ----------- | ----- | -------- | ---- | ---------------------------------- | ----- | ---- | ------------ | -------- |
+| `flux2-dev` | FLUX.2 [dev] | text→image | draft | `fal-ai/flux-2` | $0.025/img | 10 | – | – |
+| `seedream-5` | Seedream 5.0 Lite | text→image | premium | `fal-ai/bytedance/seedream/v5/lite/text-to-image` | $0.035/img | 8 | – | – |
+| `kling-3-pro` | Kling 3.0 Pro | image→video | premium | `fal-ai/kling-video/v3/pro/image-to-video` | $0.11/s | 1 | ✓ | 10s |
+| `kling-25-turbo` | Kling 2.5 Turbo Pro | image→video | draft | `fal-ai/kling-video/v2.5-turbo/pro/image-to-video` | $0.07/s | 1 | ✓ | 10s |
+| `seedance-2` | Seedance 2.0 | text→video | premium | `bytedance/seedance-2.0/text-to-video` | $0.3034/s | 9 | ✓ | 15s |
+| `veo-31` | Veo 3.1 | text→video | premium | `veo-3.1-generate-preview` (google) | $0.15/s | 3 | ✓ | 8s |
+| `veo-31-lite` | Veo 3.1 Lite | text→video | draft | `veo-3.1-lite-generate-preview` (google) | $0.05/s | – | ✓ | 8s |
 
 ElevenLabs narration TTS: **$0.30 / 1k characters** (`TTS_PRICE_PER_1K_CHARS`).
 
-> **Sora is intentionally excluded** — deprecated April 2026, API shuts down
-> September 2026.
+Kling routes also carry `max_prompt_chars=2500` and `allowed_durations=(5, 10)` — the
+fal provider truncates the prompt and snaps the clip length to satisfy the API.
+
+> **Photo-to-video only:** the pipeline animates the winning keyframe, so only the
+> **image-to-video** (Kling) models are ever selected for video. `seedance-2` and the
+> Veo routes are text-to-video and are **parked** — kept in the table but never routed
+> to (see resolution below). Lip-synced dialogue has been removed.
+>
+> **Sora is intentionally excluded** — deprecated April 2026, API shuts down Sept 2026.
 
 ### Roles
 
-- **Keyframes:** `flux2-dev` (up to 10 reference images — this is how character/style
-  consistency is enforced). Premium fallback `seedream-5` for stronger composition.
-- **Default image→video:** `kling-3-pro` (premium) / `kling-25-turbo` (draft).
-- **Hero shots / dialogue:** `veo-31` (lip-synced speech, 4K) / `veo-31-lite` (draft).
-- **Reference-driven consistency / multi-shot:** `seedance-2` (up to 9 refs, ≤15s).
+- **Keyframes:** `flux2-dev` (up to 10 reference images — how character/style
+  consistency is enforced). One keyframe per scene by default (`KEYFRAME_VARIANTS=1`);
+  premium fallback `seedream-5`.
+- **Image→video (the only video path):** `kling-3-pro` (premium) / `kling-25-turbo`
+  (draft) — animates the keyframe with native audio.
+- **Parked (text-to-video, not selected):** `seedance-2`, `veo-31`, `veo-31-lite`.
 
 ## How a scene's video model is resolved
 
 Single source of truth: `resolve_video_model()`.
 
 ```
-1. An explicit per-scene model_override → always wins (draft and premium).
-2. Premium render → the storyboard's suggested_model (a premium pick).
-3. Draft render → the budget-tier default for the scene's audio_mode.
+1. An explicit per-scene model_override → wins...
+2. Premium render → the storyboard's suggested_model...
+3. else → the tier's image-to-video default.
+4. THEN: if the chosen model is not IMAGE_TO_VIDEO, fall back to the tier's Kling
+   default — so animate is always photo-to-video (the keyframe drives the clip).
 ```
 
-So draft passes are genuinely cheaper than finals, while a user's explicit
-per-scene choice is always honored. Dialogue scenes route to a **lip-sync capable**
-model (`veo-31` premium / `veo-31-lite` draft) — and toggling a scene to
-`audio_mode="dialogue"` in the UI auto-updates its suggestion accordingly.
+Step 4 is the guarantee: even if the storyboard suggests a text-to-video model
+(Veo/Seedance), video generation animates the keyframe via Kling. Storyboards are
+narrated-only, so there is no dialogue/lip-sync routing.
 
-| Defaults | Draft | Premium |
-| -------- | ----- | ------- |
-| narrated | `kling-25-turbo` | `kling-3-pro` |
-| dialogue | `veo-31-lite` | `veo-31` |
+| Default i2v | Draft | Premium |
+| ----------- | ----- | ------- |
+| (all scenes) | `kling-25-turbo` | `kling-3-pro` |
 
 ## Cost estimator (`app/cost.py`)
 
 | Function | Computes |
 | -------- | -------- |
-| `estimate_keyframes` | 3 (best-of-N) × keyframe price per scene |
+| `estimate_keyframes` | `KEYFRAME_VARIANTS` (=1) × keyframe price per scene |
 | `estimate_video(tier)` | per scene: `resolve_video_model(tier)` price/s × duration |
 | `estimate_audio` | per narrated scene: `chars/1000 × $0.30` |
 | `estimate_full_project(tier)` | keyframes + video + narration |
@@ -90,9 +98,9 @@ verbatim for consistency.
 
 | `prompt_style` | Shape | Notes |
 | -------------- | ----- | ----- |
-| `kling` | Concise, motion-forward, camera inline | "… Camera: slow push in." + style |
-| `veo` | Rich cinematic description | Adds lip-sync line for dialogue; "ambient only" otherwise |
-| `seedance` | Reference-driven | Emphasizes strict consistency to reference images |
+| `kling` | Concise, motion-forward, camera inline | "… Camera: slow push in." + style. The active video dialect. |
+| `veo` | Rich cinematic description | Parked (text-to-video, not routed). |
+| `seedance` | Reference-driven | Parked (text-to-video, not routed). |
 | `flux` | Keyframe prompt + style block | Used for still keyframes |
 
 ## Adding or swapping a model

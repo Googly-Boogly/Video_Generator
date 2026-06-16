@@ -69,6 +69,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ instruction }),
     }),
+  refineStoryboard: (pid: string) =>
+    req<Job>(`/api/projects/${pid}/scenes/refine`, { method: "POST" }),
 
   getJob: (id: string) => req<Job>(`/api/jobs/${id}`),
   jobsForProject: (pid: string) => req<Job[]>(`/api/jobs/project/${pid}`),

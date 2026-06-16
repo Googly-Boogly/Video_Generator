@@ -3,11 +3,13 @@
 Turn a single text prompt into a finished short film with audio, through an AI
 pipeline. Fully dockerized — one `docker compose up` brings up everything.
 
-> **Status: all 6 phases complete** — the **full pipeline runs end to end**:
-> storyboard + review UI → FLUX.2 best-of-N keyframes → video + quality gate →
-> audio build (narration + music bed + **librosa** beat grid) → AI editor (EDL) →
-> real FFmpeg **480p draft / 1080p final** render with preview, export, and a
-> **cost dashboard** (estimated vs actual). See [docs/ROADMAP.md](docs/ROADMAP.md).
+> **Status: all 6 phases complete + a Phase-7 pivot** — the **full pipeline runs end to
+> end**: storyboard + review UI (+ optional **multi-agent CrewAI "Refine with AI"**) →
+> one FLUX.2 keyframe/scene → **photo-to-video** clips (the keyframe is animated by Kling;
+> image-to-video only, no lip-sync) + quality gate → audio build (one continuous narration
+> track + music bed + **librosa** beat grid) → AI editor (EDL) → real FFmpeg **480p draft /
+> 1080p final** render with preview, export, and a **cost dashboard**.
+> See [docs/ROADMAP.md](docs/ROADMAP.md) — incl. the open **real-music** TODO.
 
 ---
 
@@ -44,18 +46,17 @@ spend**. Flip `MOCK_GENERATION=false` and supply keys to go live (see
 2. That LLM writes a **style bible** (locked palette, lighting, lens, character
    sheet) and a shot-by-shot **storyboard**.
 3. You **review and edit** the storyboard — edit any field, reorder, add/delete
-   scenes, pick a model per scene, toggle narrated/dialogue audio, or revise
-   conversationally ("make scene 3 moodier"). **Nothing costs money until you
-   approve.**
-4. On approval, FLUX.2 renders **3 keyframe variants per scene** (with the style
-   reference images attached for consistency); the vision model ranks them and you
-   pick the winner in a **best-of-N selection UI**.
-5. The winning keyframes are **animated into clips** by the routed model; native
-   audio is demuxed per clip and a **vision quality gate** flags artifacts for
-   one-click regeneration. Clips play right in the browser.
+   scenes, pick a model per scene, or revise conversationally ("make scene 3 moodier").
+   Optionally hit **✨ Refine with AI** for a multi-agent (CrewAI) critique + rewrite of
+   the storyboard and narration. **Nothing costs money until you approve.**
+4. On approval, FLUX.2 renders **one keyframe per scene** (with the style reference
+   images attached for consistency).
+5. Each keyframe is **animated into a clip** via an image-to-video model (Kling —
+   photo-to-video); native audio is demuxed per clip and a **vision quality gate** flags
+   artifacts for one-click regeneration. Clips play right in the browser.
 6. The **audio build** adds ElevenLabs narration in one locked voice, a music bed
    with a librosa **beat grid**, and a mix plan that ducks native audio under
-   narration (dialogue scenes pause narration).
+   narration. All narration is one continuous voiceover track (no per-scene overlap).
 7. The **AI editor** assembles an Edit Decision List (trims, transitions, captions,
    beat-snap, mix); **FFmpeg renders** a 480p watermarked draft, then a 1080p final
    (hero shots regenerated at premium). Preview and **download** in the browser.

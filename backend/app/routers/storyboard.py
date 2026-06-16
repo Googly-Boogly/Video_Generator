@@ -156,3 +156,28 @@ def revise_storyboard(project_id: str, payload: ReviseRequest, db: Session = Dep
     db.commit()
     db.refresh(job)
     return job
+
+
+@router.post("/refine", response_model=JobOut, status_code=202)
+def refine_storyboard(project_id: str, db: Session = Depends(get_db)):
+    """Multi-agent (CrewAI) critique + refine of the storyboard and narration."""
+    from ..tasks import refine_storyboard_task
+    from ..jobs_util import ensure_project_idle
+
+    project = _get_project(db, project_id)
+    ensure_project_idle(db, project.id)
+    job = Job(
+        project_id=project.id,
+        type=JobType.STORYBOARD_REFINE.value,
+        status=JobStatus.QUEUED.value,
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+
+    async_result = refine_storyboard_task.delay(project.id, job.id)
+    job.celery_task_id = async_result.id
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    return job

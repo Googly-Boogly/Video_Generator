@@ -103,6 +103,61 @@ def generate_storyboard_task(self, project_id: str, job_id: str) -> dict:
             return {"ok": False, "error": str(exc)}
 
 
+@celery_app.task(bind=True, name="storyforge.refine_storyboard")
+def refine_storyboard_task(self, project_id: str, job_id: str,
+                           agents: list[str] | None = None) -> dict:
+    """Multi-agent (CrewAI) critique + refine of the storyboard and narration.
+    Replaces the scenes with the crew's corrected storyboard; no-op in mock mode."""
+    from . import cost
+    from .pipeline import refine as refine_stage
+    from .pipeline import storyboard as sb_stage
+
+    with session_scope() as db:
+        project = db.get(Project, project_id)
+        if not project:
+            _set_job(db, job_id, status=JobStatus.FAILED.value, error="project not found")
+            return {"ok": False}
+
+        _set_job(db, job_id, status=JobStatus.RUNNING.value, progress=0.1)
+        try:
+            refined = refine_stage.refine_storyboard(
+                idea=project.idea,
+                target_length=project.target_length,
+                style_bible=project.style_bible,
+                storyboard=_scenes_to_dict(project),
+                llm=project.llm_model,
+                agents=agents,
+            )
+            mocked = bool(refined.pop("_refined_mock", False))
+            music = refined.pop("music_suggestion", None)
+
+            board = sb_stage._validate(refined)  # validate + clamp durations + backfill
+            _write_scenes(db, project, board)
+
+            # Stash the Music Director's pick on the style bible (read by the audio stage/UI).
+            if music:
+                sb = dict(project.style_bible or {})
+                sb["music_suggestion"] = music
+                project.style_bible = sb
+            project.status = ProjectStatus.STORYBOARDED.value
+            db.add(project)
+            db.flush()
+
+            if not mocked:
+                cost.add_entry(
+                    db, project.id, job_id, "refine", "AI storyboard refine",
+                    f"{len(agents or refine_stage.ALL_AGENTS) + 2} agents (estimated)", 0.05)
+
+            _set_job(db, job_id, status=JobStatus.SUCCESS.value, progress=1.0,
+                     result={"scene_count": len(board.scenes),
+                             "music_suggestion": music, "mock": mocked})
+            return {"ok": True, "scene_count": len(board.scenes)}
+        except Exception as exc:  # noqa: BLE001
+            log.exception("storyboard refine failed")
+            _set_job(db, job_id, status=JobStatus.FAILED.value, error=str(exc))
+            return {"ok": False, "error": str(exc)}
+
+
 @celery_app.task(bind=True, name="storyforge.revise_storyboard")
 def revise_storyboard_task(self, project_id: str, job_id: str, instruction: str) -> dict:
     from .pipeline import storyboard as sb_stage

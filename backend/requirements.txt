@@ -29,6 +29,9 @@ elevenlabs==1.50.3
 
 httpx==0.28.1
 
+# --- Multi-agent storyboard/narration refine (pipeline/refine.py, lazy-imported) ---
+crewai>=0.80,<1
+
 # --- Dev / test ---
 pytest==8.3.4
 
