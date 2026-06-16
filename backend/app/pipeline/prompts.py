@@ -43,6 +43,11 @@ Rules:
   Always write narration_text, set audio_mode "narrated", and leave dialogue_text null.
   Never use "dialogue" — this pipeline animates a still keyframe (photo-to-video) and has
   no lip-sync, so there is no on-camera speech.
+- All scenes' narration_text is concatenated into ONE continuous voiceover track (it is
+  NOT timed per scene), so write it to flow as a single cohesive narration from the first
+  scene to the last. Pace it to the film length: about 2.5 spoken words per second of the
+  TOTAL target duration (≈38 words for a 15s film), with each scene's line roughly its
+  share of that, so the voiceover never runs longer than the video.
 - image_prompt describes a single still keyframe. video_prompt describes the motion.
 - Keep image_prompt and video_prompt concise: one to two sentences of scene content
   plus the embedded style descriptors. Never write multi-paragraph prompts.

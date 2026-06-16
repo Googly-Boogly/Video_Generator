@@ -62,6 +62,7 @@ class JobType(str, Enum):
     STYLE_BIBLE = "style_bible"
     STORYBOARD = "storyboard"
     STORYBOARD_REVISE = "storyboard_revise"
+    STORYBOARD_REFINE = "storyboard_refine"
     KEYFRAMES = "keyframes"
     VIDEO = "video"
     QUALITY = "quality"

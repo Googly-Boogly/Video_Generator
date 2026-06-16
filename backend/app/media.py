@@ -265,17 +265,23 @@ def assemble_video(
             nlabels.append(f"[na{i}]")
         fc.append("".join(nlabels) + f"concat=n={len(scenes)}:v=0:a=1[natcat]")
 
-        # --- Narration: delay each to its scene offset, mix ---
+        # --- Narration: ONE continuous voiceover track. The per-scene lines are read
+        #     back-to-back (concat), never overlapping, and decoupled from scene timing —
+        #     a line that runs longer than its scene can no longer collide with the next
+        #     scene's narration (the "two voices at once" bug). Padded/trimmed to the film
+        #     length so the music duck and final mix line up.
         narr_labels = []
         for i, s in enumerate(scenes):
             if i in narr_idx:
-                off = int(offsets[i] * 1000)
                 ndb = float(s.get("narration_db", 0.0) or 0.0)
-                fc.append(f"[{narr_idx[i]}:a]adelay={off}|{off},volume={ndb}dB,{af}[nr{i}]")
+                fc.append(f"[{narr_idx[i]}:a]{af},volume={ndb}dB[nr{i}]")
                 narr_labels.append(f"[nr{i}]")
         have_narr = bool(narr_labels)
         if have_narr:
-            fc.append("".join(narr_labels) + f"amix=inputs={len(narr_labels)}:normalize=0[narrmix]")
+            chain = "".join(narr_labels)
+            if len(narr_labels) > 1:
+                chain += f"concat=n={len(narr_labels)}:v=0:a=1,"
+            fc.append(f"{chain}apad,atrim=0:{total:.3f},asetpts=PTS-STARTPTS[narrmix]")
 
         # --- Music bed: pad/trim to total, level ---
         have_music = music_index is not None
