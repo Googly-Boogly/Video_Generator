@@ -113,6 +113,17 @@ def _probe_duration(path: Path) -> float | None:
         return None
 
 
+def _has_audio_stream(path: Path) -> bool:
+    """True if the file has at least one audio stream. Some video models return
+    video-only clips, and referencing [i:a] on those crashes the filtergraph."""
+    proc = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries",
+         "stream=index", "-of", "csv=p=0", str(path)],
+        capture_output=True,
+    )
+    return bool(proc.stdout.decode().strip())
+
+
 def duration_of(*, audio_or_video_bytes: bytes, suffix: str = ".mp4") -> float:
     """Probe the duration (seconds) of an audio/video payload."""
     with tempfile.TemporaryDirectory() as d:
@@ -155,13 +166,15 @@ def assemble_video(
             count += 1
             return idx
 
-        # Clip inputs (each provides [i:v] and [i:a] = native audio).
-        clip_idx, durs = [], []
+        # Clip inputs (each provides [i:v]; [i:a] = native audio IF present —
+        # some video models return video-only clips).
+        clip_idx, durs, clip_has_audio = [], [], []
         for i, s in enumerate(scenes):
             f = dp / f"clip{i}.mp4"
             f.write_bytes(s["clip_bytes"])
             clip_idx.append(add_input(f))
             durs.append(_probe_duration(f) or float(s.get("duration", 5.0)))
+            clip_has_audio.append(_has_audio_stream(f))
 
         # Narration inputs (narrated scenes only).
         narr_idx: dict[int, int] = {}
@@ -232,15 +245,23 @@ def assemble_video(
             fc.append("[vcat]null[vout]")
 
         # --- Native audio: trim+level each clip's track, concat ---
+        # Clips without an audio stream get synthesized silence so the concat stays
+        # aligned (n = len(scenes)) and the filtergraph never binds a missing [i:a].
         nlabels = []
         for i, s in enumerate(scenes):
             th, tdur = trims[i]
             db = s.get("native_db")
             vol = -100.0 if db is None else float(db)  # muted/None -> silence
-            fc.append(
-                f"[{clip_idx[i]}:a]atrim=start={th:.3f}:end={th + tdur:.3f},asetpts=PTS-STARTPTS,"
-                f"volume={vol}dB,{af}[na{i}]"
-            )
+            if clip_has_audio[i]:
+                fc.append(
+                    f"[{clip_idx[i]}:a]atrim=start={th:.3f}:end={th + tdur:.3f},asetpts=PTS-STARTPTS,"
+                    f"volume={vol}dB,{af}[na{i}]"
+                )
+            else:
+                fc.append(
+                    f"anullsrc=channel_layout=stereo:sample_rate=44100,"
+                    f"atrim=0:{tdur:.3f},asetpts=PTS-STARTPTS,{af}[na{i}]"
+                )
             nlabels.append(f"[na{i}]")
         fc.append("".join(nlabels) + f"concat=n={len(scenes)}:v=0:a=1[natcat]")
 

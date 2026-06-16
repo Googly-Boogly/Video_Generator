@@ -31,12 +31,12 @@ def build_edl(project_id: str, db: Session = Depends(get_db)):
     """Generate the Edit Decision List from the storyboard + frames + audio."""
     from ..tasks import build_edl_task
 
-    from ..jobs_util import ensure_no_active_job
+    from ..jobs_util import ensure_project_idle
 
     project = _project(db, project_id)
     if not any(s.clip_asset_id for s in project.scenes):
         raise HTTPException(400, "no clips — generate video first")
-    ensure_no_active_job(db, project.id, [JobType.EDIT.value])
+    ensure_project_idle(db, project.id)
 
     job = Job(project_id=project.id, type=JobType.EDIT.value, status=JobStatus.QUEUED.value)
     db.add(job)
@@ -68,8 +68,8 @@ def render(project_id: str, final: bool = False, db: Session = Depends(get_db)):
     if not project.edl:
         raise HTTPException(400, "no EDL — run the editor first")
 
-    from ..jobs_util import ensure_no_active_job
-    ensure_no_active_job(db, project.id, [JobType.RENDER_DRAFT.value, JobType.RENDER_FINAL.value])
+    from ..jobs_util import ensure_project_idle
+    ensure_project_idle(db, project.id)
 
     jtype = JobType.RENDER_FINAL.value if final else JobType.RENDER_DRAFT.value
     job = Job(project_id=project.id, type=jtype, status=JobStatus.QUEUED.value)

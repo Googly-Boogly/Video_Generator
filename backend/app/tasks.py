@@ -698,7 +698,17 @@ def _write_scenes(db, project: Project, board) -> None:
     Mutate through the relationship collection so the delete-orphan cascade and
     the in-memory collection stay consistent (clearing then appending avoids
     leaving deleted instances referenced by project.scenes).
+
+    Replacing the scenes invalidates everything derived from them, so remove those
+    assets too — otherwise keyframes/clips/etc. survive pointing at deleted scenes
+    (stranded in MinIO + DB). Remove through the collection so the before_delete
+    blob cleanup + cascade stay consistent (see CLAUDE.md). Reference images live at
+    the style-bible level (scene_id is None) and stay valid.
     """
+    _DERIVED_KINDS = {"keyframe", "clip", "native_audio", "frame", "narration"}
+    for a in [a for a in project.assets if a.kind in _DERIVED_KINDS]:
+        project.assets.remove(a)
+    db.flush()
     project.scenes.clear()  # delete-orphan removes the old rows on flush
     db.flush()
     for sc in board.scenes:

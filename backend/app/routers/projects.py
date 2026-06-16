@@ -85,12 +85,12 @@ def delete_project(project_id: str, db: Session = Depends(get_db)):
 def kick_off_storyboard(project_id: str, db: Session = Depends(get_db)):
     """Generate (or regenerate) the style bible + storyboard asynchronously."""
     from ..tasks import generate_storyboard_task
-    from ..jobs_util import ensure_no_active_job
+    from ..jobs_util import ensure_project_idle
 
     project = db.get(Project, project_id)
     if not project:
         raise HTTPException(404, "project not found")
-    ensure_no_active_job(db, project.id, [JobType.STORYBOARD.value, JobType.STORYBOARD_REVISE.value])
+    ensure_project_idle(db, project.id)
 
     job = Job(project_id=project.id, type=JobType.STORYBOARD.value, status=JobStatus.QUEUED.value)
     db.add(job)

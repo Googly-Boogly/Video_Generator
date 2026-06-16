@@ -45,6 +45,9 @@ class ModelRoute:
     max_clip_seconds: float = 10.0
     notes: str = ""
     google_id: Optional[str] = None  # model id when provider == "google"
+    # Provider API contract limits (None = no special handling)
+    max_prompt_chars: Optional[int] = None          # cap prompt length (e.g. Kling = 2500)
+    allowed_durations: Optional[tuple[int, ...]] = None  # snap clip length to nearest of these
 
 
 # ---------------------------------------------------------------------------
@@ -91,6 +94,8 @@ MODEL_ROUTES: dict[str, ModelRoute] = {
         max_reference_images=1,
         native_audio=True,
         max_clip_seconds=10.0,
+        max_prompt_chars=2500,
+        allowed_durations=(5, 10),
         notes="Strong motion + subject consistency across angles, native audio.",
     ),
     "kling-25-turbo": ModelRoute(
@@ -105,6 +110,8 @@ MODEL_ROUTES: dict[str, ModelRoute] = {
         max_reference_images=1,
         native_audio=True,
         max_clip_seconds=10.0,
+        max_prompt_chars=2500,
+        allowed_durations=(5, 10),
         notes="Budget tier for draft passes.",
     ),
 

@@ -110,6 +110,18 @@ export default function StoryboardReview() {
 
   async function revise(text: string) {
     if (!id || !text.trim()) return;
+    // Revising regenerates all scenes, which discards any keyframes/clips already
+    // produced (they're tied to the scenes being replaced). Warn before throwing
+    // that work away rather than silently resetting the project.
+    const hasDownstream = scenes.some((s) => s.keyframe_asset_id || s.clip_asset_id);
+    if (
+      hasDownstream &&
+      !window.confirm(
+        "Revising the storyboard regenerates every scene and discards the keyframes and " +
+          "clips you've already generated for this project. Continue?"
+      )
+    )
+      return;
     setRevising(true);
     setError(null);
     try {

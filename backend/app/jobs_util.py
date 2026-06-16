@@ -47,3 +47,23 @@ def ensure_no_active_job(db: Session, project_id: str, types: list[str]) -> None
     ).first()
     if active:
         raise HTTPException(409, f"a {active.type} job is already in progress for this project")
+
+
+def ensure_project_idle(db: Session, project_id: str) -> None:
+    """Raise 409 if ANY generation job is queued/running for the project.
+
+    Every pipeline stage mutates the project's scenes/assets, so two running at once
+    (e.g. keyframes while a video job runs, or a revise mid-generation) race on the
+    same rows and deadlock in Postgres — which leaves the project in an inconsistent,
+    half-generated state. Stages are sequential per project, so we require the project
+    to be idle before starting any new generation job.
+    """
+    active = db.scalars(
+        select(Job).where(Job.project_id == project_id, Job.status.in_(_ACTIVE))
+    ).first()
+    if active:
+        raise HTTPException(
+            409,
+            f"a {active.type} job is already running for this project — "
+            "wait for it to finish before starting another stage",
+        )

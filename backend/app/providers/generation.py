@@ -21,7 +21,8 @@ def generate_video(
 
         return fal_provider.generate_video(
             model_id=model_id, prompt=prompt, duration=duration,
-            aspect_ratio=aspect_ratio, image_url=image_url, reference_urls=reference_urls,
+            aspect_ratio=aspect_ratio, image_url=image_url, image_bytes=image_bytes,
+            reference_urls=reference_urls,
         )
     if provider == "google":
         from . import google_provider

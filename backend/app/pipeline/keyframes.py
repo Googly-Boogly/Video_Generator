@@ -12,7 +12,7 @@ from ..config import settings
 from ..models_config import DEFAULT_KEYFRAME_MODEL
 from . import mock, prompts
 
-KEYFRAME_VARIANTS = 3
+KEYFRAME_VARIANTS = 1  # one keyframe per scene (set >1 to re-enable best-of-N + vision ranking)
 
 
 @dataclass
@@ -57,6 +57,12 @@ def rank_keyframes(
     variants: list[KeyframeVariant], *, scene: dict, character_sheet=None, llm: str | None = None
 ) -> dict:
     """Auto-rank variants. Returns {winner, scores:[{index,score,reason}]}."""
+    if len(variants) <= 1:
+        # Single keyframe — it's the winner; skip the (paid) vision ranking call.
+        return {
+            "winner": 0,
+            "scores": [{"index": 0, "score": 1.0, "reason": "only keyframe"}] if variants else [],
+        }
     if settings.mock_generation:
         # Deterministic mock ranking: first variant wins, descending synthetic scores.
         return {

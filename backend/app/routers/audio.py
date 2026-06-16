@@ -140,9 +140,9 @@ def mix_plan(project_id: str, db: Session = Depends(get_db)):
 
 def _enqueue(db: Session, project: Project, scene_id: str | None) -> Job:
     from ..tasks import build_audio_task
-    from ..jobs_util import ensure_no_active_job
+    from ..jobs_util import ensure_project_idle
 
-    ensure_no_active_job(db, project.id, [JobType.AUDIO.value])
+    ensure_project_idle(db, project.id)
     job = Job(project_id=project.id, type=JobType.AUDIO.value,
               status=JobStatus.QUEUED.value, scene_id=scene_id)
     db.add(job)
