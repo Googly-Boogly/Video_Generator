@@ -39,9 +39,10 @@ Rules:
 - Total of all scene durations must be within ±2s of the target length.
 - Each scene's duration_seconds must be between 2 and 8 seconds.
 - Embed the locked style descriptors verbatim into every image_prompt and video_prompt.
-- Default to audio_mode "narrated": narration carries the words, scenes avoid on-screen
-  speaking. Only use audio_mode "dialogue" when a character must visibly speak on camera;
-  then set dialogue_text and keep narration_text empty for that scene.
+- Every scene is audio_mode "narrated": narration carries all spoken content as voiceover.
+  Always write narration_text, set audio_mode "narrated", and leave dialogue_text null.
+  Never use "dialogue" — this pipeline animates a still keyframe (photo-to-video) and has
+  no lip-sync, so there is no on-camera speech.
 - image_prompt describes a single still keyframe. video_prompt describes the motion.
 - Keep image_prompt and video_prompt concise: one to two sentences of scene content
   plus the embedded style descriptors. Never write multi-paragraph prompts.
@@ -98,21 +99,21 @@ EXAMPLE OUTPUT:
     {
       "scene_number": 2,
       "duration_seconds": 6,
-      "shot_description": "Mara's helmet lamp catches a carved face; she speaks into her comm, breath ragged",
+      "shot_description": "Mara's helmet lamp catches a carved face as she edges closer through the murk",
       "camera_movement": "handheld tracking right, slow",
       "image_prompt": "Close on a diver's copper helmet, beam raking across a barnacled carved stone face. desaturated teal noir, volumetric haze; palette teal, charcoal, amber; shafting caustic god-rays from above; 24mm wide, shallow depth of field. Mara: weathered diver, scarred dry-suit, copper helmet.",
-      "video_prompt": "Helmet lamp sweeps over the carving, particulate drifting through the beam as Mara turns toward camera to speak. desaturated teal noir, volumetric haze; palette teal, charcoal, amber; shafting caustic god-rays from above; 24mm wide.",
-      "narration_text": "",
-      "audio_mode": "dialogue",
-      "dialogue_text": "Base, are you seeing this? It's... it's looking back.",
-      "suggested_model": "veo-31"
+      "video_prompt": "Helmet lamp sweeps over the carving, particulate drifting through the beam as Mara edges closer. desaturated teal noir, volumetric haze; palette teal, charcoal, amber; shafting caustic god-rays from above; 24mm wide.",
+      "narration_text": "Something here had been waiting a very long time to be found.",
+      "audio_mode": "narrated",
+      "dialogue_text": null,
+      "suggested_model": "kling-25-turbo"
     }
   ]
 }
 Note how the example: keeps total duration within 2s of target (6+6=12); embeds every
-style descriptor verbatim into both image_prompt and video_prompt; uses a narrated scene
-plus one dialogue scene (narration_text empty, dialogue_text set); and picks suggested_model
-per scene only from the provided ids. Match this rigor for the REAL idea below.
+style descriptor verbatim into both image_prompt and video_prompt; keeps every scene
+narrated (narration_text set, audio_mode "narrated", dialogue_text null); and picks
+suggested_model per scene only from the provided ids. Match this rigor for the REAL idea below.
 --- END EXAMPLE ---"""
 
 

@@ -172,16 +172,11 @@ TTS_PRICE_PER_1K_CHARS = 0.30
 
 DEFAULT_KEYFRAME_MODEL = "flux2-dev"
 
-# Default image-to-video model by render tier.
+# Default image-to-video model by render tier. This pipeline is photo-to-video only:
+# every scene animates its winning keyframe (no lip-synced/text-to-video models).
 DEFAULT_VIDEO_BY_TIER: dict[Tier, str] = {
     Tier.DRAFT: "kling-25-turbo",
     Tier.PREMIUM: "kling-3-pro",
-}
-
-# Dialogue scenes must route to a lip-sync capable model.
-DEFAULT_DIALOGUE_BY_TIER: dict[Tier, str] = {
-    Tier.DRAFT: "veo-31-lite",
-    Tier.PREMIUM: "veo-31",
 }
 
 
@@ -191,10 +186,9 @@ def route(model_id: str) -> ModelRoute:
     return MODEL_ROUTES[model_id]
 
 
-def default_video_model(tier: Tier, audio_mode: str) -> str:
-    """Pick the default video model for a scene given render tier + audio mode."""
-    if audio_mode == "dialogue":
-        return DEFAULT_DIALOGUE_BY_TIER[tier]
+def default_video_model(tier: Tier, audio_mode: str = "narrated") -> str:
+    """Default image-to-video model for a scene by render tier (audio_mode ignored —
+    photo-to-video only, no lip-sync routing)."""
     return DEFAULT_VIDEO_BY_TIER[tier]
 
 
@@ -209,12 +203,20 @@ def resolve_video_model(
       2. Premium renders use the storyboard's `suggested_model` (a premium pick).
       3. Draft renders use the budget-tier default for the audio mode, so draft
          passes are genuinely cheaper than finals.
+
+    Animate = photo-to-video: the winning keyframe must drive the clip, so the result
+    is always an IMAGE_TO_VIDEO model. A text-to-video pick (e.g. a suggested
+    Veo/Seedance hero shot) falls back to the tier's image-to-video default.
     """
     if model_override and model_override in MODEL_ROUTES:
-        return model_override
-    if tier == Tier.PREMIUM and suggested_model in MODEL_ROUTES:
-        return suggested_model
-    return default_video_model(tier, audio_mode)
+        chosen = model_override
+    elif tier == Tier.PREMIUM and suggested_model in MODEL_ROUTES:
+        chosen = suggested_model
+    else:
+        chosen = default_video_model(tier, audio_mode)
+    if route(chosen).modality != Modality.IMAGE_TO_VIDEO:
+        chosen = DEFAULT_VIDEO_BY_TIER[tier]
+    return chosen
 
 
 def models_for_modality(modality: Modality) -> list[ModelRoute]:

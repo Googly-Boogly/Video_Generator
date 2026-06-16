@@ -362,13 +362,6 @@ def _clip_for_scene(db, project, scene, v_stage, q_stage, tier, char_sheet, ref_
     db.add(scene)
     db.flush()
 
-    # Clear previous clip/native/frame assets for idempotent re-runs (remove via
-    # the relationship so the cascade stays consistent on full regenerates).
-    for a in [a for a in project.assets
-              if a.scene_id == scene.id and a.kind in ("clip", "native_audio", "frame")]:
-        project.assets.remove(a)
-    db.flush()
-
     keyframe_bytes = get_bytes(keyframe.storage_key)
     scene_dict = {
         "scene_number": scene.scene_number,
@@ -382,11 +375,21 @@ def _clip_for_scene(db, project, scene, v_stage, q_stage, tier, char_sheet, ref_
         "model_override": scene.model_override,
     }
 
+    # Generate FIRST, then replace. If generation (or the keyframe fetch above) fails,
+    # we must not have already deleted the existing clip — otherwise a failed regenerate
+    # wipes good content. So only clear the previous clip/native/frame assets once we
+    # hold a new clip (remove via the relationship so the cascade + MinIO before_delete
+    # stay consistent on re-runs).
     clip = v_stage.generate_clip(
         scene=scene_dict, style_bible=project.style_bible, tier=tier,
         keyframe_bytes=keyframe_bytes, keyframe_url=public_url(keyframe.storage_key),
         reference_urls=ref_urls, aspect_ratio=project.aspect_ratio,
     )
+
+    for a in [a for a in project.assets
+              if a.scene_id == scene.id and a.kind in ("clip", "native_audio", "frame")]:
+        project.assets.remove(a)
+    db.flush()
 
     clip_asset = _store_asset(
         db, project.id, scene.id, "clip", clip.clip_bytes, clip.clip_content_type,
