@@ -14,6 +14,16 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+
+# CrewAI 0.193 otherwise (a) exports telemetry to telemetry.crewai.com — which hangs
+# ~30s on a read timeout in this network — and (b) prints an interactive "view execution
+# traces? [y/N]" prompt that blocks ~20s in a worker with no stdin. Disable both so a
+# refine runs clean. Set before CrewAI is imported (it's lazy-imported below).
+os.environ.setdefault("OTEL_SDK_DISABLED", "true")
+os.environ.setdefault("CREWAI_DISABLE_TELEMETRY", "true")
+os.environ.setdefault("CREWAI_TRACING_ENABLED", "false")
+os.environ.setdefault("CREWAI_TELEMETRY_OPT_OUT", "true")
 
 from ..config import settings
 from ..llm import _extract_json
@@ -194,7 +204,11 @@ def _run_crew(*, idea, target_length, style_bible, storyboard, llm, enabled: set
     agents.append(showrunner)
     tasks.append(showrunner_task)
 
-    crew = Crew(agents=agents, tasks=tasks, process=Process.sequential, verbose=False)
+    # tracing=False suppresses CrewAI 0.193's interactive "view execution traces?"
+    # prompt (the env vars above don't fully kill it) — it otherwise blocks ~20s per
+    # run in a worker with no stdin.
+    crew = Crew(agents=agents, tasks=tasks, process=Process.sequential,
+                verbose=False, tracing=False)
     result = crew.kickoff()
     raw = getattr(result, "raw", None) or str(result)
     refined = _extract_json(raw)
