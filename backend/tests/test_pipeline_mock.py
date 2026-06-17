@@ -88,17 +88,21 @@ def test_override_wins_on_both_tiers():
         assert got == "kling-3-pro"
 
 
-def test_text_to_video_pick_falls_back_to_image_to_video():
-    # Animate is photo-to-video only: a text-to-video override or suggestion
-    # (Veo/Seedance) is forced back to the tier's image-to-video default.
-    assert resolve_video_model(
-        model_override="seedance-2", suggested_model=None,
-        audio_mode="narrated", tier=Tier.PREMIUM,
-    ) == "kling-3-pro"
+def test_text_to_video_suggestion_falls_back_but_explicit_override_wins():
+    # An auto/suggested text-to-video pick (a Veo hero shot the user didn't choose)
+    # falls back to the tier's image-to-video default — t2v is never automatic.
     assert resolve_video_model(
         model_override=None, suggested_model="veo-31",
         audio_mode="narrated", tier=Tier.PREMIUM,
     ) == "kling-3-pro"
+    # But an EXPLICIT per-scene override into text-to-video (Veo) is honored on both
+    # tiers — this is how a scene opts into text-to-video over photo-to-video.
+    for tier in (Tier.DRAFT, Tier.PREMIUM):
+        assert resolve_video_model(
+            model_override="veo-31", suggested_model="kling-3-pro",
+            audio_mode="narrated", tier=tier,
+        ) == "veo-31"
+        assert MODEL_ROUTES["veo-31"].modality == Modality.TEXT_TO_VIDEO
 
 
 def test_prompt_translator_dialects_differ():
@@ -156,6 +160,46 @@ def test_video_clip_is_playable_mp4_and_demuxes_audio():
     assert len(qr.frames) == 4                        # 4 frames extracted
     assert all(f[:2] == b"\xff\xd8" for f in qr.frames)  # JPEGs
     assert "flagged" in qr.report
+
+
+def test_text_to_video_override_overrides_keyframe(monkeypatch):
+    # A Veo (text-to-video) override generates from the prompt and overrides the
+    # keyframe — no image is sent to the provider. An image-to-video override still
+    # forwards the keyframe so Kling can animate it.
+    from app.pipeline import video as v_stage
+    from app.models_config import Tier
+    from app import media
+    from app.providers import generation
+
+    real_clip = media.image_to_clip(
+        image_bytes=mock.placeholder_png("x", width=32, height=18),
+        duration=1.0, aspect_ratio="16:9",
+    )
+    captured: dict = {}
+
+    def fake_generate_video(**kw):
+        captured.clear()
+        captured.update(kw)
+        return real_clip
+
+    monkeypatch.setattr(generation, "generate_video", fake_generate_video)
+    monkeypatch.setattr(v_stage.settings, "mock_generation", False)
+
+    scene = {"scene_number": 1, "video_prompt": "a phalanx advances", "audio_mode": "narrated",
+             "duration_seconds": 1.0, "model_override": "veo-31", "suggested_model": "kling-3-pro"}
+    clip = v_stage.generate_clip(
+        scene=scene, style_bible=None, tier=Tier.PREMIUM,
+        keyframe_bytes=b"KEYFRAMEBYTES", keyframe_url="https://x/kf.png", aspect_ratio="16:9",
+    )
+    assert clip.model_id == "veo-31"
+    assert captured["image_bytes"] is None and captured["image_url"] is None  # photo overridden
+
+    scene["model_override"] = "kling-3-pro"
+    v_stage.generate_clip(
+        scene=scene, style_bible=None, tier=Tier.PREMIUM,
+        keyframe_bytes=b"KEYFRAMEBYTES", keyframe_url="https://x/kf.png", aspect_ratio="16:9",
+    )
+    assert captured["image_bytes"] == b"KEYFRAMEBYTES" and captured["image_url"] == "https://x/kf.png"
 
 
 def test_veo_routes_to_google_others_to_fal():

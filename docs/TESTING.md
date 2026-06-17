@@ -26,7 +26,7 @@ docker compose exec api python -m pytest -q
 cd backend && MOCK_GENERATION=true python -m pytest -q
 ```
 
-Expected: **75 passed** (35 unit + 40 integration).
+Expected: **77 passed** (36 unit + 41 integration).
 
 > The media/audio/Phase 3 tests invoke real FFmpeg + librosa (present in the
 > backend image), so run them in the container — encoding/demux/frame-extraction

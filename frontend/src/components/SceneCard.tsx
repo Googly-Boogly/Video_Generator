@@ -135,10 +135,16 @@ export default function SceneCard(props: Props) {
               >
                 {videoModels.map((m) => (
                   <option key={m.id} value={m.id}>
-                    {m.label} {m.tier === "premium" ? "★" : ""} {m.lip_sync ? "(lip-sync)" : ""}
+                    {m.label} {m.tier === "premium" ? "★" : ""}{" "}
+                    {m.modality === "text_to_video" ? "(text→video, overrides keyframe)" : "(photo→video)"}
                   </option>
                 ))}
               </select>
+              {videoModels.find((m) => m.id === effectiveModel)?.modality === "text_to_video" && (
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Text-to-video: generated from the prompt, the keyframe is overridden.
+                </p>
+              )}
               {scene.model_override && (
                 <button
                   className="text-[11px] text-slate-500 hover:text-accent2 mt-1"

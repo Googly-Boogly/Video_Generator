@@ -17,9 +17,12 @@ is animated by Kling — image-to-video only, no lip-sync) + quality gate; audio
 user-triggered **multi-agent (CrewAI) "Refine with AI"** pass over the storyboard/narration.
 See [docs/ROADMAP.md](docs/ROADMAP.md) — incl. the open **real-music** TODO.
 
-**Photo-to-video, narrated-only:** every scene animates its keyframe via an image-to-video
-model; all speech is voiceover narration concatenated into a single track. `KEYFRAME_VARIANTS=1`
-(best-of-N off by default). Lip-synced dialogue + Veo/Seedance video routing are removed/parked.
+**Photo-to-video by default, narrated-only:** by default every scene animates its keyframe
+via an image-to-video model (Kling); all speech is voiceover narration concatenated into a
+single track. `KEYFRAME_VARIANTS=1` (best-of-N off by default). A scene can opt into
+**text-to-video (Veo)** as its per-scene `model_override` — that generates the clip from the
+prompt and **overrides the keyframe** (no image sent; the keyframe is still produced for the
+review UI). Text-to-video is opt-in per scene, never automatic. Lip-synced dialogue is parked.
 
 ## Ports (IMPORTANT — non-default)
 
@@ -55,7 +58,7 @@ the FFmpeg path is exercised. FFmpeg is in the backend image; Phase 3 tests use 
 ```bash
 docker compose up --build              # start everything
 docker compose restart worker          # REQUIRED after editing tasks.py (Celery has no hot-reload)
-docker compose exec api python -m pytest -q     # 75 tests, FFmpeg+librosa in image
+docker compose exec api python -m pytest -q     # 77 tests, FFmpeg+librosa in image
 docker compose exec frontend npm run build      # tsc type-check + prod build
 python scripts/smoke_test.py           # 95 live checks against the running stack
 docker compose logs -f api|worker      # tail logs
@@ -75,9 +78,11 @@ does not** — restart it after changing `tasks.py` or anything it imports.
 - **Model facts are config.** `app/models_config.py` (generation) and `app/llm_config.py`
   (LLMs) are the single source of truth for routing, pricing, and capabilities. A
   project's LLM is chosen on the New Project form and stored in `projects.llm_model`. `resolve_video_model()` decides a
-  scene's model (override > premium suggestion > draft default) and **always returns an
-  image-to-video model** — a text-to-video pick falls back to the tier's Kling default
-  (photo-to-video only). Nothing else hardcodes model ids or prices.
+  scene's model (override > premium suggestion > draft default). An explicit per-scene
+  `model_override` is honored in **any** modality (this is how a scene opts into Veo
+  text-to-video, which overrides the keyframe). The auto/suggested paths must animate the
+  keyframe, so a non-override text-to-video pick falls back to the tier's Kling i2v default.
+  Nothing else hardcodes model ids or prices.
 - **Concurrency:** generation endpoints call `jobs_util.ensure_project_idle` — only one
   generation job per project at a time (overlapping jobs deadlock on the scenes table).
   Don't `docker compose restart worker` mid-run: `task_acks_late` re-queues the in-flight
@@ -100,7 +105,7 @@ backend/app/
   storage.py        MinIO/S3 helper
   asset_store.py    store_asset(): put bytes in MinIO + create the Asset row
   media.py          FFmpeg: encode/demux/extract, synth music, assemble_video (render EDL)
-  providers/        fal_provider (image/video) + google_provider (Veo, parked) +
+  providers/        fal_provider (image/video) + google_provider (Veo text/image-to-video) +
                     elevenlabs_provider (TTS) + generation.py (video dispatch) — mock-gated
   celery_app.py tasks.py            the ONLY place generation runs (worker_ready clears stale jobs)
   jobs_util.py      ensure_project_idle (one generation job per project) + fail_orphaned_jobs
@@ -121,7 +126,7 @@ Keep all three green under `MOCK_GENERATION=true` (CI must never spend money):
 
 - **pytest** (`backend/tests/`) — unit (`test_pipeline_mock.py`) + API integration
   (`test_api_integration.py`, SQLite + eager Celery + in-memory storage shim).
-  Currently **75 passed**.
+  Currently **77 passed**.
 - **smoke** (`scripts/smoke_test.py`) — **95 checks** against the live stack.
 - **frontend** — `npm run build` must type-check clean (dev mode hides TS errors).
 

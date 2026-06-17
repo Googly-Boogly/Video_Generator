@@ -311,6 +311,21 @@ def test_native_audio_asset_defaults_unmuted(client):
     assert native["meta"]["muted"] is False
 
 
+def test_video_with_text_to_video_override(client):
+    # A scene can select Veo (text-to-video) as its model override; the clip is then
+    # generated from the prompt and overrides the keyframe. (Mock still encodes a
+    # playable placeholder, so the whole task path is exercised.)
+    p = _ready_project(client)
+    pid = p["id"]
+    sid = client.get(f"/api/projects/{pid}/scenes").json()[0]["id"]
+    r = client.patch(f"/api/projects/{pid}/scenes/{sid}", json={"model_override": "veo-31"})
+    assert r.json()["model_override"] == "veo-31"
+    _video(client, pid)
+    clip_id = client.get(f"/api/projects/{pid}/scenes/{sid}").json()["clip_asset_id"]
+    clip = client.get(f"/api/assets/{clip_id}").json()
+    assert clip["meta"]["model_id"] == "veo-31"  # routed to text-to-video, not Kling
+
+
 def test_premium_tier_routes_premium_model(client):
     p = _ready_project(client)
     pid = p["id"]

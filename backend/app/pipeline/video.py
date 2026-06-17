@@ -1,16 +1,18 @@
-"""Stage 6: image-to-video via the routed model + native-audio demux.
+"""Stage 6: video generation via the routed model + native-audio demux.
 
-Dialogue scenes route to a lip-sync model (Veo) with dialogue_text embedded.
-Native audio is demuxed from every clip into its own asset. In mock mode the
-clip is encoded with FFmpeg from the winning keyframe (real, playable video),
-just without paying an AI model.
+Default routing is photo-to-video: the routed image-to-video model (Kling) animates
+the winning keyframe. A scene can instead select a text-to-video model (Veo) as its
+`model_override` — that generates the clip straight from the prompt and **overrides
+the keyframe** (no image is sent). Native audio is demuxed from every clip into its
+own asset. In mock mode the clip is encoded with FFmpeg from the keyframe (real,
+playable video), just without paying an AI model.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 from ..config import settings
-from ..models_config import Tier, resolve_video_model, route
+from ..models_config import Modality, Tier, resolve_video_model, route
 from .. import media
 from . import prompts
 
@@ -41,8 +43,13 @@ def generate_clip(
     model_id = resolve_model(scene=scene, tier=tier)
     prompt = prompts.translate_video_prompt(model_id=model_id, scene=scene, style_bible=style_bible)
     duration = float(scene.get("duration_seconds", 5.0))
+    # Text-to-video (Veo) generates from the prompt and overrides the keyframe — no
+    # image is sent. Image-to-video (Kling) animates the keyframe as before.
+    text_to_video = route(model_id).modality == Modality.TEXT_TO_VIDEO
 
     if settings.mock_generation:
+        # Mock always encodes a playable placeholder from the keyframe (even for t2v),
+        # so the FFmpeg path + UI preview are exercised without paying a model.
         if not keyframe_bytes:
             raise RuntimeError("missing winning keyframe for clip")
         clip = media.image_to_clip(
@@ -52,8 +59,9 @@ def generate_clip(
         from ..providers import generation
 
         clip = generation.generate_video(
-            model_id=model_id, prompt=prompt, duration=duration,
-            aspect_ratio=aspect_ratio, image_url=keyframe_url, image_bytes=keyframe_bytes,
+            model_id=model_id, prompt=prompt, duration=duration, aspect_ratio=aspect_ratio,
+            image_url=None if text_to_video else keyframe_url,
+            image_bytes=None if text_to_video else keyframe_bytes,
             reference_urls=reference_urls,
         )
 

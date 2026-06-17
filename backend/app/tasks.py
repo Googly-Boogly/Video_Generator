@@ -406,18 +406,30 @@ def generate_video_task(self, project_id: str, job_id: str, tier: str = "draft",
 
 def _clip_for_scene(db, project, scene, v_stage, q_stage, tier, char_sheet, ref_urls,
                     get_bytes, public_url) -> str:
-    if not scene.keyframe_asset_id:
+    from .config import settings
+    from .models_config import Modality, route
+
+    # A text-to-video override (Veo) generates from the prompt and overrides the
+    # keyframe, so it needs no winning keyframe in live mode. Mock still encodes a
+    # placeholder from the keyframe, and image-to-video (Kling) animates it, so both
+    # still require one.
+    model_id = v_stage.resolve_model(scene={
+        "audio_mode": scene.audio_mode, "model_override": scene.model_override,
+        "suggested_model": scene.suggested_model,
+    }, tier=tier)
+    needs_keyframe = settings.mock_generation or route(model_id).modality == Modality.IMAGE_TO_VIDEO
+
+    keyframe = db.get(Asset, scene.keyframe_asset_id) if scene.keyframe_asset_id else None
+    if needs_keyframe and not keyframe:
         raise RuntimeError("no winning keyframe — generate keyframes first")
-    keyframe = db.get(Asset, scene.keyframe_asset_id)
-    if not keyframe:
-        raise RuntimeError("winning keyframe asset missing")
 
     scene.status = SceneStatus.GENERATING.value
     scene.error = None
     db.add(scene)
     db.flush()
 
-    keyframe_bytes = get_bytes(keyframe.storage_key)
+    keyframe_bytes = get_bytes(keyframe.storage_key) if keyframe else None
+    keyframe_url = public_url(keyframe.storage_key) if keyframe else None
     scene_dict = {
         "scene_number": scene.scene_number,
         "shot_description": scene.shot_description,
@@ -437,7 +449,7 @@ def _clip_for_scene(db, project, scene, v_stage, q_stage, tier, char_sheet, ref_
     # stay consistent on re-runs).
     clip = v_stage.generate_clip(
         scene=scene_dict, style_bible=project.style_bible, tier=tier,
-        keyframe_bytes=keyframe_bytes, keyframe_url=public_url(keyframe.storage_key),
+        keyframe_bytes=keyframe_bytes, keyframe_url=keyframe_url,
         reference_urls=ref_urls, aspect_ratio=project.aspect_ratio,
     )
 

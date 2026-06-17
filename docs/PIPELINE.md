@@ -8,10 +8,12 @@ returns instant placeholder output (see [Mock mode](#mock-mode)).
 style_bible → storyboard → (refine) → keyframes → video → quality → audio → editor → assemble
 ```
 
-This is a **photo-to-video, narrated-only** pipeline: every scene animates its winning
-keyframe via an image-to-video model (Kling), and all speech is voiceover narration on
-one continuous track. There is no lip-synced on-camera dialogue. The optional **refine**
-step is a user-triggered multi-agent (CrewAI) critique/rewrite of the storyboard.
+This is a **photo-to-video-by-default, narrated-only** pipeline: by default every scene
+animates its winning keyframe via an image-to-video model (Kling). A scene can opt into
+**text-to-video (Veo)** as its `model_override`, which generates the clip from the prompt
+and overrides the keyframe. All speech is voiceover narration on one continuous track;
+there is no lip-synced on-camera dialogue. The optional **refine** step is a
+user-triggered multi-agent (CrewAI) critique/rewrite of the storyboard.
 
 ## Stages
 
@@ -118,11 +120,14 @@ generate_video_task(project_id, tier="draft", [scene_id])
   └─ project.status = clips
 ```
 
-- **Photo-to-video, always:** `resolve_video_model` guarantees an image-to-video
-  (Kling) model — a text-to-video suggestion (Veo/Seedance) falls back to the tier's
-  Kling default. The winning keyframe is **uploaded to fal** as the `image_url` (local
-  MinIO URLs aren't reachable from fal). Tier-aware: `?tier=draft` (kling-25-turbo) /
-  `?tier=premium` (kling-3-pro); per-scene `model_override` wins if it's also i2v.
+- **Photo-to-video by default, text-to-video opt-in:** for the auto/suggested paths
+  `resolve_video_model` returns an image-to-video (Kling) model — a t2v *suggestion*
+  (Veo/Seedance) falls back to the tier's Kling default. An explicit per-scene
+  `model_override` wins in any modality: choosing **Veo** generates the clip from the
+  prompt and **overrides the keyframe** (no image sent). For the Kling (i2v) path the
+  winning keyframe is **uploaded to fal** as the `image_url` (local MinIO URLs aren't
+  reachable from fal). Tier-aware: `?tier=draft` (kling-25-turbo / veo-31-lite) /
+  `?tier=premium` (kling-3-pro / veo-31).
 - **Native audio per clip:** every clip's audio track is demuxed into its own
   asset so it can be leveled independently in Phase 4 (15–30% under narration).
   If the garble check trips, the native track is auto-muted (`meta.muted=true`).
@@ -214,8 +219,8 @@ and the mix plan in `pipeline/editor.py`):
 - **Native model audio** (ambience/Foley/SFX) — demuxed from every generated clip
   into its own track, mixed **15–30% under narration** (`NATIVE_DUCK_DB = -16 dB`).
   It's the only way to get Foley that matches on-screen motion.
-- **No on-screen dialogue / lip-sync** — this is a photo-to-video pipeline (the
-  keyframe is animated by Kling), so there is no lip-synced speech. All spoken content
+- **No on-screen dialogue / lip-sync** — clips come from photo-to-video (Kling) or
+  text-to-video (Veo override); neither is used for lip-synced speech. All spoken content
   is voiceover narration. Storyboards are narrated-only.
 - **Quality gate** flags clips whose native audio contains stray/garbled speech →
   that clip's native track is auto-muted.

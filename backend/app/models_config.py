@@ -199,18 +199,22 @@ def resolve_video_model(
     """Single source of truth for which video model a scene renders on.
 
     Resolution order (matches the spec's routing rules):
-      1. An explicit per-scene `model_override` always wins (both tiers).
+      1. An explicit per-scene `model_override` always wins (both tiers), in ANY
+         modality. This is how a scene opts into text-to-video (Veo): a t2v model
+         generates the clip straight from the prompt and overrides the keyframe
+         instead of animating it.
       2. Premium renders use the storyboard's `suggested_model` (a premium pick).
       3. Draft renders use the budget-tier default for the audio mode, so draft
          passes are genuinely cheaper than finals.
 
-    Animate = photo-to-video: the winning keyframe must drive the clip, so the result
-    is always an IMAGE_TO_VIDEO model. A text-to-video pick (e.g. a suggested
-    Veo/Seedance hero shot) falls back to the tier's image-to-video default.
+    For the auto/suggested paths (2, 3) the clip animates the winning keyframe, so the
+    result must be IMAGE_TO_VIDEO: a text-to-video suggestion (e.g. a Veo hero shot the
+    user didn't explicitly pick) falls back to the tier's image-to-video default.
+    Text-to-video is therefore opt-in per scene, never automatic.
     """
     if model_override and model_override in MODEL_ROUTES:
-        chosen = model_override
-    elif tier == Tier.PREMIUM and suggested_model in MODEL_ROUTES:
+        return model_override
+    if tier == Tier.PREMIUM and suggested_model in MODEL_ROUTES:
         chosen = suggested_model
     else:
         chosen = default_video_model(tier, audio_mode)
