@@ -20,7 +20,7 @@ def get_config():
     return {
         "mock_generation": settings.mock_generation,
         "style_presets": STYLE_PRESETS,
-        "target_lengths": [15, 30, 60],
+        "target_lengths": [15, 30, 60, 600],
         "aspect_ratios": ["16:9", "9:16", "1:1"],
         "llms": [
             {"id": r.id, "label": r.label, "provider": r.provider, "vision": r.vision}

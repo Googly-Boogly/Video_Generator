@@ -73,7 +73,7 @@ export default function NewProject() {
           <div>
             <label className="label">Target length</label>
             <div className="flex gap-2">
-              {(config?.target_lengths ?? [15, 30, 60]).map((l) => (
+              {(config?.target_lengths ?? [15, 30, 60, 600]).map((l) => (
                 <button
                   type="button"
                   key={l}
@@ -82,7 +82,7 @@ export default function NewProject() {
                     length === l ? "bg-accent text-ink border-accent" : "bg-panel2 border-edge"
                   }`}
                 >
-                  {l}s
+                  {l >= 60 ? `${l / 60}m` : `${l}s`}
                 </button>
               ))}
             </div>

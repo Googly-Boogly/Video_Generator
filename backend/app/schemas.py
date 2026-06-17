@@ -39,7 +39,7 @@ class Storyboard(BaseModel):
 class ProjectCreate(BaseModel):
     idea: str = Field(min_length=3)
     title: Optional[str] = None
-    target_length: Literal[15, 30, 60] = 30
+    target_length: Literal[15, 30, 60, 600] = 30
     aspect_ratio: Literal["16:9", "9:16", "1:1"] = "16:9"
     style_preset: str = "cinematic"
     llm_model: Optional[str] = None  # which LLM handles this project's prompts
