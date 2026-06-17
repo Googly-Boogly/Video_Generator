@@ -46,6 +46,10 @@ app.add_middleware(
         "http://localhost:5173",
         "http://localhost:3000",
     ],
+    # Accept the dev frontend on either host alias (localhost OR 127.0.0.1) and any
+    # port — the two are distinct browser origins, so loading the app at
+    # 127.0.0.1:5273 was failing the preflight against a localhost-only allowlist.
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
