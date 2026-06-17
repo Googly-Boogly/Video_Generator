@@ -41,6 +41,54 @@ def test_storyboard_validates_and_fits_target_length():
         assert s.suggested_model in MODEL_ROUTES
 
 
+def _fake_segment(n_scenes=3):
+    def _fn(*, system, user, max_tokens, llm=None):
+        return {"scenes": [
+            {"scene_number": i, "duration_seconds": 5, "shot_description": f"shot {i}",
+             "camera_movement": "static", "image_prompt": "x", "video_prompt": "x",
+             "narration_text": "hello there", "audio_mode": "narrated",
+             "dialogue_text": None, "suggested_model": "kling-3-pro"}
+            for i in range(1, n_scenes + 1)]}
+    return _fn
+
+
+def test_long_storyboard_fills_full_target_length(monkeypatch):
+    # A 10-minute film can't be one giant LLM call (the connection drops), so it's built
+    # from sequential segments. Crucially, segments UNDER-produce, so the generator must
+    # keep requesting until the accumulated duration reaches the target — otherwise the
+    # film comes out half-length (the bug: 50 scenes ≈ 5 min for a 10-min request).
+    from app.pipeline import storyboard as sb
+    calls = {"n": 0}
+
+    def fake(*, system, user, max_tokens, llm=None):
+        calls["n"] += 1
+        return _fake_segment(5)(system=system, user=user, max_tokens=max_tokens)  # ~25s/call
+
+    monkeypatch.setattr(sb.settings, "mock_generation", False)
+    monkeypatch.setattr(sb, "complete_json", fake)
+    board = sb.generate_storyboard(idea="alexander", target_length=600, aspect_ratio="16:9",
+                                   style_preset="cinematic", style_bible=None)
+    total = sum(s.duration_seconds for s in board.scenes)
+    assert total >= 600 - 5                      # reaches full length despite under-producing
+    assert calls["n"] >= 2                       # segmented, not a single call
+    assert [s.scene_number for s in board.scenes] == list(range(1, len(board.scenes) + 1))
+
+
+def test_short_storyboard_uses_single_call(monkeypatch):
+    from app.pipeline import storyboard as sb
+    calls = {"n": 0}
+
+    def fake(*, system, user, max_tokens, llm=None):
+        calls["n"] += 1
+        return _fake_segment(4)(system=system, user=user, max_tokens=max_tokens)
+
+    monkeypatch.setattr(sb.settings, "mock_generation", False)
+    monkeypatch.setattr(sb, "complete_json", fake)
+    sb.generate_storyboard(idea="x", target_length=30, aspect_ratio="16:9",
+                           style_preset="cinematic", style_bible=None)
+    assert calls["n"] == 1  # short films stay a single call
+
+
 def test_revision_targets_named_scene():
     board = sb_stage.generate_storyboard(
         idea="a fox", target_length=15, aspect_ratio="9:16", style_preset="anime", style_bible=None

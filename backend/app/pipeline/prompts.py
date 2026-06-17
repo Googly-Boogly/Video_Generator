@@ -137,6 +137,42 @@ def storyboard_user_prompt(
     )
 
 
+def storyboard_segment_user_prompt(
+    *, idea: str, target_length: int, aspect_ratio: str, style_preset: str,
+    style_bible: dict | None, available_models: list[str],
+    seconds_done: int, seg_len: int, scenes_hint: int, is_final: bool, prev_recap: str,
+) -> str:
+    """One time-window of a long storyboard. Keeps each LLM call small + reliable while
+    preserving continuity, and pins an explicit scene count so the film reaches its full
+    length (see storyboard._generate_segmented)."""
+    if prev_recap:
+        continuity = (
+            f"THE PREVIOUS SEGMENT ENDED WITH: {prev_recap}\n"
+            f"Continue the story naturally from there — do NOT restart, recap, or "
+            f"re-introduce the subject.\n"
+        )
+    else:
+        continuity = "This is the OPENING segment — establish the hook and subject.\n"
+    closing = (
+        "This is the FINAL segment — bring the film to a satisfying close.\n"
+        if is_final else ""
+    )
+    return (
+        f"IDEA: {idea}\n"
+        f"FULL FILM LENGTH: {target_length} seconds — ONE continuous narrated film.\n"
+        f"PROGRESS: about {seconds_done}s of {target_length}s have been written so far.\n"
+        f"NOW WRITE THE NEXT ~{seg_len} SECONDS as APPROXIMATELY {scenes_hint} scenes "
+        f"(each 2-8s). Do not write fewer than {max(2, scenes_hint - 2)} scenes — the "
+        f"film must reach its full length.\n"
+        f"{continuity}{closing}"
+        f"ASPECT RATIO: {aspect_ratio}\nSTYLE PRESET: {style_preset}\n\n"
+        f"STYLE BIBLE (locked — embed verbatim):\n{style_block(style_bible)}\n\n"
+        f"AVAILABLE MODEL IDS for suggested_model: {', '.join(available_models)}\n\n"
+        f"Produce ONLY this segment's scenes as the storyboard JSON now "
+        f"(scene_number may start at 1; the pipeline renumbers across segments)."
+    )
+
+
 # --- Style bible system prompt ----------------------------------------------
 
 STYLE_BIBLE_SYSTEM = """You are an art director. From a creative idea and a style preset,

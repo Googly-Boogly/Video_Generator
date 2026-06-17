@@ -21,7 +21,7 @@ user-triggered multi-agent (CrewAI) critique/rewrite of the storyboard.
 | - | ----- | ------ | ----- | ---------------- |
 | 1 | Prompt intake | (API) | ✅ 1 | Project row: idea, length, aspect, style preset |
 | 2 | Style bible + reference images | `style_bible.py` | ✅ 1–2 | Locked palette/lighting/lens + character sheet; 3–5 master reference images (character/environment/color-key) via FLUX.2 |
-| 3 | Storyboard | `storyboard.py` | ✅ 1 | Validated `scenes[]` (see schema below) |
+| 3 | Storyboard | `storyboard.py` | ✅ 1 | Validated `scenes[]` (see schema below). Films >90s are generated in sequential time-windowed **segments** (one small LLM call each, stitched + renumbered) — a single call for a 10-min film overruns and the connection drops |
 | 4 | Storyboard review | (API + UI) | ✅ 1 | Human-edited storyboard; conversational revision |
 | 4b | AI refine (multi-agent) | `refine.py` | ✅ 7 | Optional, user-triggered CrewAI crew critiques + rewrites the storyboard/narration |
 | 5 | Keyframes | `keyframes.py` | ✅ 2 | 1 FLUX.2 keyframe/scene with refs attached (`KEYFRAME_VARIANTS=1`; best-of-N + ranking off by default) |

@@ -3,7 +3,7 @@
 Output is validated against the Pydantic Storyboard schema before it is
 trusted by the rest of the pipeline.
 """
-from __future__ import annotations
+import math
 
 from ..config import settings
 from ..llm import complete_json
@@ -16,6 +16,15 @@ from ..models_config import (
 from ..schemas import Storyboard
 from . import mock, prompts
 
+# Long films can't be written in one LLM call: a ~10-minute storyboard is 100+ scenes
+# of JSON, and the request runs for minutes and the connection drops mid-generation.
+# Above this length we generate the storyboard in sequential time-windowed segments
+# (each a small, fast, reliable call) and stitch them together.
+_SINGLE_CALL_MAX_SECONDS = 90
+_SEGMENT_SECONDS = 60
+_SEGMENT_MAX_TOKENS = 16_000
+_AVG_SCENE_SECONDS = 5.0   # used to tell each segment how many scenes to write
+
 
 def _available_video_model_ids() -> list[str]:
     return [m.id for m in video_models()]
@@ -27,22 +36,75 @@ def generate_storyboard(
 ) -> Storyboard:
     if settings.mock_generation:
         default = default_video_model(Tier.PREMIUM, "narrated")
-        raw = mock.mock_storyboard(idea, target_length, default)
-    else:
+        return _validate(mock.mock_storyboard(idea, target_length, default))
+
+    models = _available_video_model_ids()
+    if target_length > _SINGLE_CALL_MAX_SECONDS:
+        return _generate_segmented(
+            idea=idea, target_length=target_length, aspect_ratio=aspect_ratio,
+            style_preset=style_preset, style_bible=style_bible, models=models, llm=llm,
+        )
+
+    raw = complete_json(
+        system=prompts.STORYBOARD_SYSTEM,
+        user=prompts.storyboard_user_prompt(
+            idea=idea, target_length=target_length, aspect_ratio=aspect_ratio,
+            style_preset=style_preset, style_bible=style_bible, available_models=models,
+        ),
+        max_tokens=_SEGMENT_MAX_TOKENS,
+        llm=llm,
+    )
+    return _validate(raw)
+
+
+def _generate_segmented(
+    *, idea: str, target_length: int, aspect_ratio: str, style_preset: str,
+    style_bible: dict | None, models: list[str], llm: str | None,
+) -> Storyboard:
+    """Write a long storyboard as sequential time-windowed segments, then stitch.
+
+    Each segment is its own small LLM call (fast + reliable), told the running progress,
+    an explicit scene count to write, and a recap of the prior segment for continuity.
+    We keep requesting segments until the accumulated duration reaches the target — the
+    model under-produces per window, so a fixed segment count leaves the film too short.
+    Scenes are concatenated and renumbered contiguously in `_validate`.
+    """
+    all_scenes: list[dict] = []
+    prev_recap = ""
+    accumulated = 0.0
+    # Safety cap so a chronically under-producing (or empty) model can't loop forever.
+    max_segments = math.ceil(target_length / _SEGMENT_SECONDS) * 3
+    seg = 0
+    while accumulated < target_length - _AVG_SCENE_SECONDS and seg < max_segments:
+        seg += 1
+        remaining = target_length - accumulated
+        seg_len = int(min(_SEGMENT_SECONDS, remaining))
+        scenes_hint = max(2, round(seg_len / _AVG_SCENE_SECONDS))
         raw = complete_json(
             system=prompts.STORYBOARD_SYSTEM,
-            user=prompts.storyboard_user_prompt(
-                idea=idea,
-                target_length=target_length,
-                aspect_ratio=aspect_ratio,
-                style_preset=style_preset,
-                style_bible=style_bible,
-                available_models=_available_video_model_ids(),
+            user=prompts.storyboard_segment_user_prompt(
+                idea=idea, target_length=target_length, aspect_ratio=aspect_ratio,
+                style_preset=style_preset, style_bible=style_bible, available_models=models,
+                seconds_done=int(accumulated), seg_len=seg_len, scenes_hint=scenes_hint,
+                is_final=remaining <= _SEGMENT_SECONDS, prev_recap=prev_recap,
             ),
-            max_tokens=100_000,
+            max_tokens=_SEGMENT_MAX_TOKENS,
             llm=llm,
         )
-    return _validate(raw)
+        seg_scenes = raw.get("scenes", []) if isinstance(raw, dict) else []
+        if not seg_scenes:
+            break  # model returned nothing — stop rather than spin
+        for s in seg_scenes:
+            try:
+                d = float(s.get("duration_seconds"))
+            except (TypeError, ValueError):
+                d = 4.0
+            s["duration_seconds"] = min(max(d, 2.0), 8.0)
+            accumulated += s["duration_seconds"]
+        all_scenes.extend(seg_scenes)
+        last = seg_scenes[-1]
+        prev_recap = f"{last.get('shot_description', '')} | {last.get('narration_text', '')}"[:400]
+    return _validate({"scenes": all_scenes})
 
 
 def revise_storyboard(
