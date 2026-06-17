@@ -123,3 +123,28 @@ def test_assemble_final_is_1080p():
     out = _two_scene_render(draft=False)
     w, h, _ = _probe_dims(out)
     assert (w, h) == (1920, 1080)
+
+
+def test_assemble_is_narration_led_with_synced_captions():
+    # `screen_time` drives each scene's on-screen length: clone-pad a clip shorter
+    # than its narration, trim one that's longer. Multiple time-coded caption events
+    # per scene (sentence-level sync) must not break the filtergraph, and the total
+    # duration must equal the summed narration-led screen time.
+    clip_short = media.image_to_clip(image_bytes=mock.placeholder_png("s"), duration=1.0, aspect_ratio="16:9")
+    clip_long = media.image_to_clip(image_bytes=mock.placeholder_png("l"), duration=4.0, aspect_ratio="16:9")
+    scenes = [
+        {"clip_bytes": clip_short, "narration_bytes": mock.silent_wav(3.0), "screen_time": 3.0,
+         "trim_head": 0.0, "audio_mode": "narrated", "narration_db": 0.0, "native_db": -16.0,
+         "captions": [{"text": "First half.", "start": 0.0, "end": 1.5},
+                      {"text": "Second half.", "start": 1.5, "end": 3.0}]},
+        {"clip_bytes": clip_long, "narration_bytes": mock.silent_wav(2.0), "screen_time": 2.0,
+         "trim_head": 0.0, "audio_mode": "narrated", "narration_db": 0.0, "native_db": -16.0,
+         "captions": [{"text": "Just one line.", "start": 0.0, "end": 2.0}]},
+    ]
+    out = media.assemble_video(
+        draft=True, aspect_ratio="16:9", scenes=scenes,
+        music_bytes=media.synth_music_bed(bpm=120, seconds=6, style="ambient"),
+    )
+    assert out[4:8] == b"ftyp"
+    dur = media.duration_of(audio_or_video_bytes=out, suffix=".mp4")
+    assert abs(dur - 5.0) < 0.5  # 3.0 (clone-padded) + 2.0 (trimmed) screen time

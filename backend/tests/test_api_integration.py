@@ -68,10 +68,10 @@ def test_scene_editing_and_routing(client):
                      json={"shot_description": "EDITED", "duration_seconds": 4})
     assert r.json()["shot_description"] == "EDITED" and r.json()["duration_seconds"] == 4.0
 
-    # Dialogue auto-routes to a lip-sync model.
+    # Photo-to-video pivot: routing is always image-to-video (no lip-sync model).
     r = client.patch(f"/api/projects/{pid}/scenes/{sid}",
                      json={"audio_mode": "dialogue", "dialogue_text": "tick"})
-    assert r.json()["suggested_model"] == "veo-31"
+    assert r.json()["suggested_model"] == "kling-3-pro"
 
     # Bad override rejected; good one accepted.
     assert client.patch(f"/api/projects/{pid}/scenes/{sid}", json={"model_override": "bogus"}).status_code == 400
@@ -140,7 +140,8 @@ def _keyframes(client, pid):
     return final
 
 
-def test_keyframes_best_of_n_flow(client):
+def test_keyframes_single_per_scene(client):
+    # Photo-to-video pivot: one keyframe per scene (best-of-N off, KEYFRAME_VARIANTS=1).
     p = _make_project(client, target_length=15)
     _storyboard(client, p["id"])
     pid = p["id"]
@@ -158,7 +159,7 @@ def test_keyframes_best_of_n_flow(client):
         assert s["status"] == "done"
         assert s["keyframe_asset_id"]
         kfs = client.get(f"/api/projects/{pid}/scenes/{s['id']}/keyframes").json()
-        assert len(kfs) == 3
+        assert len(kfs) == 1
         winners = [k for k in kfs if k["meta"]["is_winner"]]
         assert len(winners) == 1
         assert winners[0]["id"] == s["keyframe_asset_id"]
@@ -177,21 +178,24 @@ def test_keyframe_content_served(client):
     assert r.content[:4] == b"\x89PNG"
 
 
-def test_select_keyframe_override(client):
+def test_select_keyframe_endpoint(client):
+    # With one keyframe per scene, the select endpoint still sets the chosen asset
+    # as the winner (idempotent on the only candidate).
     p = _make_project(client, target_length=15)
     _storyboard(client, p["id"])
     pid = p["id"]
     _keyframes(client, pid)
     sid = client.get(f"/api/projects/{pid}/scenes").json()[0]["id"]
     kfs = client.get(f"/api/projects/{pid}/scenes/{sid}/keyframes").json()
-    runner_up = next(k for k in kfs if not k["meta"]["is_winner"])
+    assert len(kfs) == 1
+    chosen = kfs[0]
 
     s = client.post(f"/api/projects/{pid}/scenes/{sid}/keyframe/select",
-                    json={"asset_id": runner_up["id"]}).json()
-    assert s["keyframe_asset_id"] == runner_up["id"]
+                    json={"asset_id": chosen["id"]}).json()
+    assert s["keyframe_asset_id"] == chosen["id"]
     kfs2 = client.get(f"/api/projects/{pid}/scenes/{sid}/keyframes").json()
     winners = [k for k in kfs2 if k["meta"]["is_winner"]]
-    assert len(winners) == 1 and winners[0]["id"] == runner_up["id"]
+    assert len(winners) == 1 and winners[0]["id"] == chosen["id"]
 
 
 def test_regenerate_single_scene_keyframes(client):
@@ -205,7 +209,7 @@ def test_regenerate_single_scene_keyframes(client):
     assert r.status_code == 202
     assert client.get(f"/api/jobs/{r.json()['id']}").json()["status"] == "success"
     after = {k["id"] for k in client.get(f"/api/projects/{pid}/scenes/{sid}/keyframes").json()}
-    assert len(after) == 3 and before.isdisjoint(after)  # fresh assets
+    assert len(after) == 1 and before.isdisjoint(after)  # fresh asset
 
 
 def test_keyframes_requires_scenes(client):
@@ -326,9 +330,9 @@ def test_full_regenerate_keyframes_no_cascade(client):
     _keyframes(client, pid)
     job = _keyframes(client, pid)  # second full run over existing keyframes
     assert job["result"]["scenes_done"] >= 1
-    # variants not duplicated
+    # keyframes not duplicated on re-run
     sid = client.get(f"/api/projects/{pid}/scenes").json()[0]["id"]
-    assert len(client.get(f"/api/projects/{pid}/scenes/{sid}/keyframes").json()) == 3
+    assert len(client.get(f"/api/projects/{pid}/scenes/{sid}/keyframes").json()) == 1
 
 
 # --- Phase 4: audio build ---------------------------------------------------
@@ -567,6 +571,11 @@ def test_edl_then_draft_then_final_render(client):
     assert job["result"]["cuts"] >= 1
     edl = client.get(f"/api/projects/{pid}/edl").json()
     assert edl["total_duration"] > 0 and len(edl["cuts"]) >= 1
+    # Narration-led EDL: each cut carries on-screen time + sentence-level captions
+    # bounded by it, so the burned text tracks the continuous voiceover.
+    cut = edl["cuts"][0]
+    assert cut["screen_time"] > 0
+    assert cut["captions"] and cut["captions"][-1]["end"] <= cut["screen_time"] + 0.01
     assert client.get(f"/api/projects/{pid}").json()["status"] == "edited"
 
     dr = _run(client, f"/api/projects/{pid}/render?final=false")

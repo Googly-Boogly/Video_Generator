@@ -12,6 +12,7 @@ from app.pipeline import style_bible as style_stage
 from app.pipeline import editor, mock, prompts
 from app.models_config import (
     MODEL_ROUTES,
+    Modality,
     Tier,
     default_video_model,
     resolve_video_model,
@@ -52,9 +53,14 @@ def test_revision_targets_named_scene():
     assert "revised" in s2.shot_description
 
 
-def test_dialogue_routes_to_lip_sync_model():
-    assert default_video_model(Tier.PREMIUM, "dialogue") == "veo-31"
-    assert MODEL_ROUTES["veo-31"].lip_sync is True
+def test_video_routing_is_image_to_video_only():
+    # Photo-to-video pivot: audio_mode no longer affects routing — the default is
+    # always the tier's image-to-video model (lip-sync routing was removed).
+    assert default_video_model(Tier.PREMIUM, "dialogue") == default_video_model(Tier.PREMIUM)
+    assert default_video_model(Tier.PREMIUM) == "kling-3-pro"
+    assert default_video_model(Tier.DRAFT) == "kling-25-turbo"
+    assert MODEL_ROUTES[default_video_model(Tier.PREMIUM)].modality == Modality.IMAGE_TO_VIDEO
+    assert MODEL_ROUTES[default_video_model(Tier.DRAFT)].modality == Modality.IMAGE_TO_VIDEO
 
 
 def test_draft_tier_is_cheaper_than_premium():
@@ -73,12 +79,26 @@ def test_draft_tier_is_cheaper_than_premium():
 
 
 def test_override_wins_on_both_tiers():
+    # A valid image-to-video override wins on both tiers.
     for tier in (Tier.DRAFT, Tier.PREMIUM):
         got = resolve_video_model(
-            model_override="seedance-2", suggested_model="kling-3-pro",
+            model_override="kling-3-pro", suggested_model="kling-25-turbo",
             audio_mode="narrated", tier=tier,
         )
-        assert got == "seedance-2"
+        assert got == "kling-3-pro"
+
+
+def test_text_to_video_pick_falls_back_to_image_to_video():
+    # Animate is photo-to-video only: a text-to-video override or suggestion
+    # (Veo/Seedance) is forced back to the tier's image-to-video default.
+    assert resolve_video_model(
+        model_override="seedance-2", suggested_model=None,
+        audio_mode="narrated", tier=Tier.PREMIUM,
+    ) == "kling-3-pro"
+    assert resolve_video_model(
+        model_override=None, suggested_model="veo-31",
+        audio_mode="narrated", tier=Tier.PREMIUM,
+    ) == "kling-3-pro"
 
 
 def test_prompt_translator_dialects_differ():
@@ -157,12 +177,13 @@ def test_video_dispatch_picks_provider(monkeypatch):
     assert goog_out == b"GOOGLE:veo-31"
 
 
-def test_dialogue_scene_routes_to_veo():
+def test_video_resolve_model_forces_image_to_video():
     from app.pipeline import video as v_stage
     from app.models_config import Tier
-    scene = {"audio_mode": "dialogue", "model_override": None, "suggested_model": "veo-31"}
-    assert v_stage.resolve_model(scene=scene, tier=Tier.DRAFT) == "veo-31-lite"
-    assert v_stage.resolve_model(scene=scene, tier=Tier.PREMIUM) == "veo-31"
+    # A suggested text-to-video hero shot (Veo) still animates the keyframe via i2v.
+    scene = {"audio_mode": "narrated", "model_override": None, "suggested_model": "veo-31"}
+    assert v_stage.resolve_model(scene=scene, tier=Tier.DRAFT) == "kling-25-turbo"
+    assert v_stage.resolve_model(scene=scene, tier=Tier.PREMIUM) == "kling-3-pro"
 
 
 def test_audio_voices_and_mix_levels():
@@ -179,8 +200,9 @@ def test_audio_voices_and_mix_levels():
 
 def test_narration_synth_is_silent_wav_in_mock():
     from app.pipeline import audio as a
-    data, ct, dur = a.synth_narration(text="hello there friend " * 3, voice_id="voice_aria")
+    data, ct, dur, alignment = a.synth_narration(text="hello there friend " * 3, voice_id="voice_aria")
     assert ct == "audio/wav" and data[:4] == b"RIFF" and dur > 0
+    assert alignment is None  # no timestamps in mock mode
 
 
 def test_beat_grid_detects_tempo_with_librosa():
@@ -234,3 +256,65 @@ def test_mock_edl_pauses_narration_for_dialogue():
     edl = editor.build_edl(project={}, scenes=scenes, beat_grid=None)
     assert edl["cuts"][1]["mix"]["pause_narration_for_dialogue"] is True
     assert edl["cuts"][0]["mix"]["pause_narration_for_dialogue"] is False
+
+
+# --- Caption sync + narration-led timeline (Phase-7 continuous-narration fix) ---
+
+def test_caption_segments_cover_full_duration_proportionally():
+    from app.pipeline import audio as a
+    segs = a.caption_segments(
+        text="First sentence here. Second one follows. Third and last.", duration=6.0,
+    )
+    assert len(segs) == 3
+    assert segs[0]["start"] == 0.0
+    assert abs(segs[-1]["end"] - 6.0) < 0.01
+    # monotonic, non-overlapping events
+    for i in range(1, len(segs)):
+        assert segs[i]["start"] >= segs[i - 1]["start"]
+        assert segs[i - 1]["end"] <= segs[i]["start"] + 0.001
+    # degenerate inputs produce nothing (never crash the editor)
+    assert a.caption_segments(text="", duration=5.0) == []
+    assert a.caption_segments(text="hi", duration=0) == []
+
+
+def test_caption_segments_use_elevenlabs_alignment():
+    from app.pipeline import audio as a
+    text = "Hello world. Goodbye now."
+    # Fabricate per-character timing at 0.1s/char (what ElevenLabs returns).
+    starts = [round(0.1 * i, 3) for i in range(len(text))]
+    ends = [round(0.1 * (i + 1), 3) for i in range(len(text))]
+    alignment = {
+        "characters": list(text),
+        "character_start_times_seconds": starts,
+        "character_end_times_seconds": ends,
+    }
+    segs = a.caption_segments(text=text, duration=2.6, alignment=alignment)
+    assert len(segs) == 2
+    assert segs[0]["start"] == 0.0
+    # "Goodbye now." starts at char index 13 -> ~1.3s, not a proportional guess.
+    assert abs(segs[1]["start"] - 1.3) < 0.2
+
+
+def test_caption_segments_wrap_long_lines():
+    from app.pipeline import audio as a
+    segs = a.caption_segments(text="word " * 30, duration=5.0, wrap_width=20)
+    assert segs and "\n" in segs[0]["text"]  # wrapped to fit on screen
+
+
+def test_editor_narration_led_timeline_and_captions():
+    # Each scene is on screen for exactly its narration duration (not the clip's),
+    # so the burned caption tracks the single continuous voiceover scene-for-scene.
+    scenes = [
+        {"scene_number": 1, "duration": 5.0, "audio_mode": "narrated",
+         "narration_text": "Alpha beta gamma.", "narration_duration": 3.0, "native_muted": False},
+        {"scene_number": 2, "duration": 5.0, "audio_mode": "narrated",
+         "narration_text": "Delta epsilon zeta.", "narration_duration": 7.0, "native_muted": False},
+    ]
+    edl = editor.build_edl(project={"aspect_ratio": "16:9"}, scenes=scenes, beat_grid=None)
+    assert edl["cuts"][0]["screen_time"] == 3.0
+    assert edl["cuts"][1]["screen_time"] == 7.0      # narration outlasting the clip is honored
+    assert abs(edl["total_duration"] - 10.0) < 0.01
+    assert edl["cuts"][1]["in"] == edl["cuts"][0]["out"]   # contiguous timeline
+    for cut in edl["cuts"]:
+        assert cut["captions"]
+        assert cut["captions"][-1]["end"] <= cut["screen_time"] + 0.001

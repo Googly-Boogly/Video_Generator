@@ -55,7 +55,7 @@ the FFmpeg path is exercised. FFmpeg is in the backend image; Phase 3 tests use 
 ```bash
 docker compose up --build              # start everything
 docker compose restart worker          # REQUIRED after editing tasks.py (Celery has no hot-reload)
-docker compose exec api python -m pytest -q     # 67 tests, FFmpeg+librosa in image
+docker compose exec api python -m pytest -q     # 75 tests, FFmpeg+librosa in image
 docker compose exec frontend npm run build      # tsc type-check + prod build
 python scripts/smoke_test.py           # 95 live checks against the running stack
 docker compose logs -f api|worker      # tail logs
@@ -121,7 +121,7 @@ Keep all three green under `MOCK_GENERATION=true` (CI must never spend money):
 
 - **pytest** (`backend/tests/`) — unit (`test_pipeline_mock.py`) + API integration
   (`test_api_integration.py`, SQLite + eager Celery + in-memory storage shim).
-  Currently **67 passed**.
+  Currently **75 passed**.
 - **smoke** (`scripts/smoke_test.py`) — **95 checks** against the live stack.
 - **frontend** — `npm run build` must type-check clean (dev mode hides TS errors).
 

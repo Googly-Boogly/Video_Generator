@@ -26,7 +26,7 @@ step is a user-triggered multi-agent (CrewAI) critique/rewrite of the storyboard
 | 6 | Video generation | `video.py` | ✅ 3 | One image-to-video clip/scene (Kling, keyframe-driven) + demuxed native audio |
 | 7 | Quality gate | `quality.py` | ✅ 3 | 4 frames/clip + the vision model artifact/identity flags + garbled-speech auto-mute |
 | 8 | Audio build | `audio.py` | ✅ 4 | ElevenLabs narration (locked voice), music bed + librosa beat grid, native-track mix plan |
-| 9 | AI editor | `editor.py` | ✅ 5 | Edit Decision List (order, trims, transitions, captions, beat-snap, mix plan) |
+| 9 | AI editor | `editor.py` | ✅ 5 | Edit Decision List (order, **narration-led screen time**, trims, transitions, **sentence-level synced captions**, beat-snap, mix plan) |
 | 10 | Draft → final render | `assemble.py` + `media.py` | ✅ 5 | Real FFmpeg: 480p watermarked draft → 1080p H.264/AAC final with hybrid audio mix |
 | 11 | Preview & export | (API + UI) | ✅ 5 | In-browser player, download (Content-Disposition), history with "▶ watch" |
 
@@ -162,14 +162,16 @@ build_audio_task(project_id, [scene_id])
 
 ```
 build_edl_task → editor.build_edl(scenes, beat_grid)
-   EDL = { total_duration, cuts[{scene_number, in, out, trim_head, trim_tail,
-           transition, caption, on_beat, mix}], beat_grid, levels, engine }
+   EDL = { total_duration, cuts[{scene_number, in, out, screen_time, trim_head,
+           trim_tail, transition, caption, captions[{text,start,end}], on_beat,
+           mix}], beat_grid, levels, engine }
    → project.edl, status = edited
 
 render_task(final) → assemble.render → media.assemble_video (FFmpeg)
    ├─ final only: regenerate hero scenes (flagged) at premium tier
-   ├─ video: trim each clip, scale to 480p/1080p, burn caption, concat, (draft) watermark
-   ├─ audio: native (trim+level, concat; synth silence for video-only clips)
+   ├─ video: fit each clip to its screen_time (trim long / clone-pad short), scale to
+   │         480p/1080p, burn time-coded captions, concat, (draft) watermark
+   ├─ audio: native (trim+pad+level, concat; synth silence for video-only clips)
    │         + narration (ALL lines concatenated into one continuous track, trimmed to length)
    │         + music bed (pad/trim/level) → amix → limiter
    └─ store draft|final asset (replaces prior of that tier); status → draft_rendered|rendered
@@ -177,13 +179,22 @@ render_task(final) → assemble.render → media.assemble_video (FFmpeg)
 
 - The render is **real FFmpeg in both modes** — the inputs (clips, narration,
   music) are already real, so there's no mock branch.
+- **Narration-led timeline:** because narration is one continuous track, each scene is
+  on screen for exactly its narration's duration (`screen_time`) — the clip is
+  trimmed if longer or **clone-padded** (last frame held) if shorter. This locks the
+  burned caption to the spoken voiceover scene-for-scene (the prior per-scene caption
+  drift is gone). `audio.caption_segments()` splits each line into sentence-level
+  `captions[{text,start,end}]`, timed from the ElevenLabs character alignment when
+  live (`synth_with_timestamps`) and proportionally otherwise; each event is burned
+  only during its window via `drawtext enable=between(t,…)`.
 - **Hybrid mix realized:** one continuous narration track at 0 dB (per-scene lines
   concatenated back-to-back, padded/trimmed to the film length — never overlapping),
   native audio ducked to −16 dB (silenced if garble-muted; synthesized silence for any
   video-only clip), music bed at −18 dB; a final `alimiter` prevents clipping.
-- **Editor signals:** clip durations, narration durations, the librosa beat grid,
-  and audio modes. Cuts are beat-snapped (`on_beat`). The live path sends sampled
-  frames to the vision model; mock is a deterministic rules EDL from the same signals.
+- **Editor signals:** clip durations, **narration durations (which set screen time)**,
+  narration alignment, the librosa beat grid, and audio modes. Cuts are beat-snapped
+  (`on_beat`). The live path sends sampled frames to the vision model (then the timeline
+  is normalized to be narration-led); mock is a deterministic rules EDL from the same signals.
 - **Transitions:** non-`cut` cuts (and the intro/outro) render as a fade
   (dip-to-black) — reliable and timeline-exact, so the audio stays in sync.
   Overlapping crossfade (xfade) is a noted future refinement.

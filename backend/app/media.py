@@ -139,6 +139,40 @@ _DRAFT_DIMS = {"16:9": (854, 480), "9:16": (480, 854), "1:1": (480, 480)}
 _FINAL_DIMS = {"16:9": (1920, 1080), "9:16": (1080, 1920), "1:1": (1080, 1080)}
 
 
+def _caption_filters(scene: dict, dp: Path, i: int, h: int, seg_dur: float) -> str:
+    """Build the drawtext filter(s) for a scene's captions.
+
+    Prefers `captions` (time-coded events for sentence-level sync), each shown only
+    during its `[start, end]` window; falls back to a single full-segment `caption`.
+    Returns a string of `,drawtext=...` filters (empty if there's no caption).
+    """
+    fs = max(18, int(h * 0.05))
+    style = (f"fontfile={FONT}:x=(w-text_w)/2:y=h-{fs * 2}:fontsize={fs}:fontcolor=white:"
+             f"line_spacing=6:box=1:boxcolor=black@0.5:boxborderw=10")
+    out = ""
+    caps = scene.get("captions")
+    if caps:
+        for j, c in enumerate(caps):
+            text = (c.get("text") or "").strip()
+            if not text:
+                continue
+            cs = max(0.0, float(c.get("start", 0.0)))
+            ce = min(seg_dur, float(c.get("end", seg_dur)))
+            if ce <= cs:
+                ce = min(seg_dur, cs + 0.3)
+            cf = dp / f"cap{i}_{j}.txt"
+            cf.write_text(text)
+            # Commas inside the enable expression must be escaped in a filtergraph.
+            out += f",drawtext={style}:textfile={cf}:enable='between(t\\,{cs:.3f}\\,{ce:.3f})'"
+        return out
+    cap = (scene.get("caption") or "").strip()
+    if cap:
+        cf = dp / f"cap{i}.txt"
+        cf.write_text(cap)
+        out = f",drawtext={style}:textfile={cf}"
+    return out
+
+
 def assemble_video(
     *, draft: bool, aspect_ratio: str, scenes: list[dict],
     music_bytes: bytes | None = None, music_db: float = -18.0, fps: int = 24,
@@ -191,15 +225,25 @@ def assemble_video(
             f.write_bytes(music_bytes)
             music_index = add_input(f)
 
-        # Trimmed durations + timeline offsets.
-        trims, offsets, t = [], [], 0.0
+        # Per-scene segment plan: (trim_head, clip_take, screen_time).
+        #   screen_time = how long the scene is on screen (the EDL's narration-led value).
+        #   clip_take   = how much real clip we show before clone-padding to fill it.
+        # When `screen_time` is absent (legacy EDL / direct callers) we fall back to the
+        # old behavior: trim both mushy ends and show the remaining clip as-is.
+        segs, t = [], 0.0
         for i, s in enumerate(scenes):
             th = max(0.0, float(s.get("trim_head", 0) or 0))
             tt = max(0.0, float(s.get("trim_tail", 0) or 0))
-            tdur = max(0.3, durs[i] - th - tt)
-            trims.append((th, tdur))
-            offsets.append(t)
-            t += tdur
+            avail = max(0.3, durs[i] - th)
+            st = s.get("screen_time")
+            if st is not None:
+                seg_dur = max(0.3, float(st))
+                take = min(avail, seg_dur)
+            else:
+                seg_dur = max(0.3, durs[i] - th - tt)
+                take = seg_dur
+            segs.append((th, take, seg_dur))
+            t += seg_dur
         total = t
 
         fc: list[str] = []
@@ -210,28 +254,24 @@ def assemble_video(
         n = len(scenes)
         vlabels = []
         for i, s in enumerate(scenes):
-            th, tdur = trims[i]
+            th, take, seg_dur = segs[i]
             chain = (
-                f"[{clip_idx[i]}:v]trim=start={th:.3f}:end={th + tdur:.3f},setpts=PTS-STARTPTS,"
+                f"[{clip_idx[i]}:v]trim=start={th:.3f}:end={th + take:.3f},setpts=PTS-STARTPTS,"
                 f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
                 f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={fps}"
             )
-            fd = min(0.4, tdur / 3)
+            # Clone-pad the last frame when the narration outlasts the clip, so the
+            # scene stays on screen for its full narration-led screen time.
+            if seg_dur - take > 0.05:
+                chain += f",tpad=stop_mode=clone:stop_duration={seg_dur - take:.3f}"
+            fd = min(0.4, seg_dur / 3)
             fade_in = i == 0 or s.get("transition", "cut") != "cut"
             fade_out = i == n - 1 or (i + 1 < n and scenes[i + 1].get("transition", "cut") != "cut")
             if fade_in:
                 chain += f",fade=t=in:st=0:d={fd:.3f}"
             if fade_out:
-                chain += f",fade=t=out:st={tdur - fd:.3f}:d={fd:.3f}"
-            cap = (s.get("caption") or "").strip()
-            if cap:
-                cf = dp / f"cap{i}.txt"
-                cf.write_text(cap)
-                fs = max(18, int(h * 0.05))
-                chain += (
-                    f",drawtext=fontfile={FONT}:textfile={cf}:x=(w-text_w)/2:y=h-{fs * 2}:"
-                    f"fontsize={fs}:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=10"
-                )
+                chain += f",fade=t=out:st={seg_dur - fd:.3f}:d={fd:.3f}"
+            chain += _caption_filters(s, dp, i, h, seg_dur)
             fc.append(f"{chain}[v{i}]")
             vlabels.append(f"[v{i}]")
         fc.append("".join(vlabels) + f"concat=n={len(scenes)}:v=1:a=0[vcat]")
@@ -249,18 +289,20 @@ def assemble_video(
         # aligned (n = len(scenes)) and the filtergraph never binds a missing [i:a].
         nlabels = []
         for i, s in enumerate(scenes):
-            th, tdur = trims[i]
+            th, take, seg_dur = segs[i]
             db = s.get("native_db")
             vol = -100.0 if db is None else float(db)  # muted/None -> silence
             if clip_has_audio[i]:
+                # Trim to the shown clip, then pad with silence to the full screen time
+                # (matches the video clone-pad) so the concat stays frame-aligned.
                 fc.append(
-                    f"[{clip_idx[i]}:a]atrim=start={th:.3f}:end={th + tdur:.3f},asetpts=PTS-STARTPTS,"
-                    f"volume={vol}dB,{af}[na{i}]"
+                    f"[{clip_idx[i]}:a]atrim=start={th:.3f}:end={th + take:.3f},asetpts=PTS-STARTPTS,"
+                    f"volume={vol}dB,{af},apad,atrim=0:{seg_dur:.3f},asetpts=PTS-STARTPTS[na{i}]"
                 )
             else:
                 fc.append(
                     f"anullsrc=channel_layout=stereo:sample_rate=44100,"
-                    f"atrim=0:{tdur:.3f},asetpts=PTS-STARTPTS,{af}[na{i}]"
+                    f"atrim=0:{seg_dur:.3f},asetpts=PTS-STARTPTS,{af}[na{i}]"
                 )
             nlabels.append(f"[na{i}]")
         fc.append("".join(nlabels) + f"concat=n={len(scenes)}:v=0:a=1[natcat]")

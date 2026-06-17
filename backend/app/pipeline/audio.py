@@ -7,6 +7,8 @@ and the native-track leveling that the hybrid audio strategy calls for.
 """
 from __future__ import annotations
 
+import re
+
 from ..config import settings
 from .. import media
 from . import mock
@@ -42,17 +44,105 @@ def list_voices() -> list[dict]:
     return elevenlabs_provider.list_voices()
 
 
-def synth_narration(*, text: str, voice_id: str) -> tuple[bytes, str, float]:
-    """Return (audio_bytes, content_type, duration_seconds) for one narration line."""
+def synth_narration(
+    *, text: str, voice_id: str
+) -> tuple[bytes, str, float, dict | None]:
+    """Return (audio_bytes, content_type, duration_seconds, alignment) for one line.
+
+    `alignment` is the ElevenLabs character-timing map (or None in mock mode / when
+    timestamps are unavailable). It feeds per-sentence caption sync in the editor.
+    """
     if settings.mock_generation:
         seconds = max(1.0, len(text) / 15.0)  # ~15 chars/sec speaking rate
         data = mock.silent_wav(seconds)
-        return data, "audio/wav", media.duration_of(audio_or_video_bytes=data, suffix=".wav")
+        return data, "audio/wav", media.duration_of(audio_or_video_bytes=data, suffix=".wav"), None
 
     from ..providers import elevenlabs_provider
 
-    data = elevenlabs_provider.synth(text=text, voice_id=voice_id)
-    return data, "audio/mpeg", media.duration_of(audio_or_video_bytes=data, suffix=".mp3")
+    data, alignment = elevenlabs_provider.synth_with_timestamps(text=text, voice_id=voice_id)
+    return data, "audio/mpeg", media.duration_of(audio_or_video_bytes=data, suffix=".mp3"), alignment
+
+
+# --- Caption sync -----------------------------------------------------------
+# Narration is one continuous voiceover whose lines play back-to-back, so each
+# scene's on-screen time equals its narration duration (see editor.build_edl).
+# Within a scene we split the line into sentence-level caption events so the burned
+# text tracks the spoken words — timed from ElevenLabs character timestamps when
+# available, else proportional to sentence length.
+
+_SENTENCE_RE = re.compile(r".+?(?:[.!?]+(?:\s+|$)|$)", re.S)
+
+
+def _sentences(text: str) -> list[str]:
+    text = " ".join((text or "").split())
+    if not text:
+        return []
+    return [m.group(0).strip() for m in _SENTENCE_RE.finditer(text) if m.group(0).strip()]
+
+
+def _wrap(text: str, width: int) -> str:
+    """Word-wrap into ~`width`-char lines so a burned caption doesn't run off-screen."""
+    lines, cur = [], ""
+    for w in text.split():
+        if cur and len(cur) + 1 + len(w) > width:
+            lines.append(cur)
+            cur = w
+        else:
+            cur = f"{cur} {w}".strip()
+    if cur:
+        lines.append(cur)
+    return "\n".join(lines)
+
+
+def _align_segments(sentences: list[str], text: str, alignment: dict, duration: float):
+    starts = (alignment or {}).get("character_start_times_seconds") or []
+    ends = (alignment or {}).get("character_end_times_seconds") or []
+    if not starts:
+        return None
+    segs, pos = [], 0
+    for s in sentences:
+        idx = text.find(s, pos)
+        if idx < 0:
+            idx = pos
+        start = float(starts[idx]) if idx < len(starts) else (segs[-1]["end"] if segs else 0.0)
+        endpos = min(idx + len(s) - 1, len(ends) - 1)
+        end = float(ends[endpos]) if endpos >= 0 and ends else duration
+        segs.append({"text": s, "start": start, "end": end})
+        pos = idx + len(s)
+    return segs
+
+
+def caption_segments(
+    *, text: str, duration: float, alignment: dict | None = None, wrap_width: int = 38
+) -> list[dict]:
+    """Split narration into time-coded caption events spanning [0, duration].
+
+    Returns ``[{"text", "start", "end"}]`` with starts/ends relative to the scene's
+    narration. One event per sentence, wrapped to ~`wrap_width`-char lines. Timing
+    uses the ElevenLabs alignment when given, else is proportional to sentence length.
+    """
+    text = " ".join((text or "").split())
+    if not text or duration <= 0:
+        return []
+    sentences = _sentences(text) or [text]
+
+    segs = _align_segments(sentences, text, alignment, duration) if alignment else None
+    if not segs:
+        total = sum(len(s) for s in sentences) or 1
+        segs, t = [], 0.0
+        for i, s in enumerate(sentences):
+            end = duration if i == len(sentences) - 1 else t + duration * len(s) / total
+            segs.append({"text": s, "start": t, "end": end})
+            t = end
+
+    return [
+        {
+            "text": _wrap(s["text"], wrap_width),
+            "start": round(max(0.0, s["start"]), 3),
+            "end": round(min(duration, max(s["start"] + 0.1, s["end"])), 3),
+        }
+        for s in segs
+    ]
 
 
 def synth_library_bed(*, track_id: str) -> tuple[bytes, dict]:

@@ -5,8 +5,15 @@ grid + audio_modes and returns an EDL: clip order, in/out trims (cut mushy clip
 starts/ends), a transition per cut, captions with timestamps, and a per-scene mix
 plan (narration / music / native levels, ducking, narration pauses for dialogue).
 
+**Narration-led timeline:** narration is one continuous track, so each scene's on-screen
+time (`screen_time`) equals its narration duration — the render fits the clip to that
+(trim if longer, clone-pad if shorter). Captions are split into sentence-level events
+(`captions[{text,start,end}]`) via `audio.caption_segments`, timed from the ElevenLabs
+character alignment when available, so the burned text tracks the spoken voiceover.
+
 Mock mode produces a deterministic EDL from the same real signals (durations,
-narration lengths, beat grid); the vision path is used when live.
+narration lengths/alignment, beat grid); the vision path is used when live, then run
+through `_normalize_timeline` so the render is narration-led regardless of source.
 """
 from __future__ import annotations
 
@@ -25,14 +32,34 @@ def build_edl(*, project: dict, scenes: list[dict], beat_grid: dict | None = Non
     for the live vision path.
     """
     if not settings.mock_generation and frames:
-        return _vision_edl(project=project, scenes=scenes, beat_grid=beat_grid, frames=frames, llm=llm)
+        edl = _vision_edl(project=project, scenes=scenes, beat_grid=beat_grid, frames=frames, llm=llm)
+        return _normalize_timeline(edl, scenes)
 
     cuts, t = [], 0.0
     beats = (beat_grid or {}).get("beats") or []
+    first = scenes[0]["scene_number"] if scenes else None
     for s in scenes:
-        dur = float(s.get("duration", 5.0))
-        th = tt = min(DEFAULT_TRIM, dur / 6)
-        tdur = max(0.3, dur - th - tt)
+        clip_dur = float(s.get("duration", 5.0))
+        th = tt = min(DEFAULT_TRIM, clip_dur / 6)
+        clip_trimmed = max(0.3, clip_dur - th - tt)
+        text = (s.get("narration_text") or "").strip()
+        narr_dur = s.get("narration_duration")
+        narrated = s.get("audio_mode", "narrated") != "dialogue" and bool(text) and bool(narr_dur)
+
+        # Narration-led timeline: each scene is on screen for exactly its narration's
+        # duration, so the burned caption and the single continuous voiceover stay
+        # locked scene-for-scene (the clip is looped/clone-padded or trimmed to fit).
+        # Dialogue / no-narration scenes fall back to the trimmed clip length.
+        screen_time = max(0.3, float(narr_dur)) if narrated else clip_trimmed
+        if narrated:
+            caps = a_stage.caption_segments(
+                text=text, duration=screen_time, alignment=s.get("narration_alignment"),
+            )
+        elif text:
+            caps = [{"text": text[:120], "start": 0.0, "end": round(screen_time, 3)}]
+        else:
+            caps = []
+
         mix = a_stage.mix_plan(
             audio_mode=s.get("audio_mode", "narrated"),
             native_muted=bool(s.get("native_muted")),
@@ -40,15 +67,17 @@ def build_edl(*, project: dict, scenes: list[dict], beat_grid: dict | None = Non
         cuts.append({
             "scene_number": s["scene_number"],
             "in": round(t, 2),
-            "out": round(t + tdur, 2),
+            "out": round(t + screen_time, 2),
+            "screen_time": round(screen_time, 3),
             "trim_head": round(th, 2),
             "trim_tail": round(tt, 2),
-            "transition": "cut" if s["scene_number"] == scenes[0]["scene_number"] else "crossfade",
-            "caption": (s.get("narration_text") or "").strip()[:120],
+            "transition": "cut" if s["scene_number"] == first else "crossfade",
+            "caption": " ".join(c["text"].replace("\n", " ") for c in caps)[:120],
+            "captions": caps,
             "on_beat": _nearest_beat(t, beats),
             "mix": mix,
         })
-        t += tdur
+        t += screen_time
 
     return {
         "total_duration": round(t, 2),
@@ -64,6 +93,34 @@ def _nearest_beat(t: float, beats: list[float]) -> float | None:
     if not beats:
         return None
     return round(min(beats, key=lambda b: abs(b - t)), 3)
+
+
+def _normalize_timeline(edl: dict, scenes: list[dict]) -> dict:
+    """Ensure every cut carries `screen_time` + `captions` and a narration-led
+    timeline, regardless of EDL source (the vision model may omit either). Keeps the
+    render path identical for mock, rules, and vision EDLs."""
+    by_num = {s["scene_number"]: s for s in scenes}
+    t = 0.0
+    for cut in edl.get("cuts", []):
+        s = by_num.get(cut.get("scene_number"), {})
+        st = cut.get("screen_time")
+        if st is None:
+            st = s.get("narration_duration") or (cut.get("out", 0) - cut.get("in", 0)) \
+                or float(s.get("duration", 5.0))
+        st = max(0.3, float(st))
+        cut["screen_time"] = round(st, 3)
+        cut["in"], cut["out"] = round(t, 2), round(t + st, 2)
+        if not cut.get("captions"):
+            text = (s.get("narration_text") or "").strip()
+            if text and s.get("audio_mode", "narrated") != "dialogue":
+                cut["captions"] = a_stage.caption_segments(
+                    text=text, duration=st, alignment=s.get("narration_alignment"))
+            else:
+                cap = (cut.get("caption") or "").strip()
+                cut["captions"] = [{"text": cap[:120], "start": 0.0, "end": round(st, 3)}] if cap else []
+        t += st
+    edl["total_duration"] = round(t, 2)
+    return edl
 
 
 def _vision_edl(*, project, scenes, beat_grid, frames, llm=None) -> dict:

@@ -34,7 +34,7 @@ tests/             unit + API integration (SQLite + eager Celery)
 
 ```bash
 # Via compose (recommended): see ../README.md
-docker compose exec api python -m pytest -q       # 67 tests (uses FFmpeg + librosa)
+docker compose exec api python -m pytest -q       # 75 tests (uses FFmpeg + librosa)
 
 # Standalone uvicorn (needs Postgres/Redis/MinIO reachable):
 uvicorn app.main:app --reload

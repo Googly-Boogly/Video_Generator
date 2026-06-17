@@ -544,12 +544,13 @@ def _narration_for_scene(db, project, scene, voice_id, a_stage) -> None:
     for a in [a for a in project.assets if a.kind == "narration" and a.scene_id == scene.id]:
         project.assets.remove(a)  # delete-orphan; keeps the collection consistent
     db.flush()
-    data, content_type, duration = a_stage.synth_narration(
+    data, content_type, duration, alignment = a_stage.synth_narration(
         text=scene.narration_text, voice_id=voice_id
     )
     _store_asset(
         db, project.id, scene.id, "narration", data, content_type,
-        meta={"voice_id": voice_id, "duration": duration, "chars": len(scene.narration_text)},
+        meta={"voice_id": voice_id, "duration": duration, "chars": len(scene.narration_text),
+              "alignment": alignment},
     )
 
 
@@ -691,6 +692,7 @@ def _edl_scene_inputs(project: Project) -> list[dict]:
             "native_muted": bool((native.meta or {}).get("muted")) if native else False,
             "narration_text": s.narration_text,
             "narration_duration": (narr.meta or {}).get("duration") if narr else None,
+            "narration_alignment": (narr.meta or {}).get("alignment") if narr else None,
         })
     return out
 
@@ -716,7 +718,9 @@ def _render_scene_inputs(db, project: Project, get_bytes) -> list[dict]:
             "narration_bytes": get_bytes(narr.storage_key) if narr else None,
             "trim_head": cut.get("trim_head", 0.0),
             "trim_tail": cut.get("trim_tail", 0.0),
+            "screen_time": cut.get("screen_time"),
             "caption": cut.get("caption", ""),
+            "captions": cut.get("captions"),
             "transition": cut.get("transition", "cut"),
             "audio_mode": scene.audio_mode,
             "narration_db": mix.get("narration_db"),
