@@ -89,6 +89,47 @@ def test_short_storyboard_uses_single_call(monkeypatch):
     assert calls["n"] == 1  # short films stay a single call
 
 
+def test_refine_chunked_apply_never_drops_scenes(monkeypatch):
+    # Refining a long board applies notes in chunks; if the model under-returns or errors,
+    # the chunk keeps its originals — so a 10-min film can't collapse to 3 min.
+    from app.pipeline import refine
+    scenes = [{"scene_number": i, "duration_seconds": 5, "shot_description": f"s{i}",
+               "narration_text": f"n{i}", "audio_mode": "narrated"} for i in range(1, 41)]
+
+    def under_returns(*, system, user, max_tokens, llm=None):
+        return {"scenes": [{"scene_number": 1, "shot_description": "x"}]}  # too few
+
+    monkeypatch.setattr(refine, "complete_json", under_returns)
+    out = refine._apply_notes_chunked(scenes, notes="tighten", llm=None)
+    assert len(out) == 40  # every scene preserved despite the model returning fewer
+
+
+def test_refine_chunked_apply_uses_rewrites(monkeypatch):
+    import json as _json
+    from app.pipeline import refine
+    scenes = [{"scene_number": i, "duration_seconds": 5, "shot_description": f"s{i}",
+               "narration_text": f"n{i}", "audio_mode": "narrated"} for i in range(1, 31)]
+
+    def rewrite(*, system, user, max_tokens, llm=None):
+        batch = _json.loads(user.split("SCENES TO REWRITE (JSON):\n", 1)[1])["scenes"]
+        for s in batch:
+            s["shot_description"] = "REWRITTEN"
+        return {"scenes": batch}
+
+    monkeypatch.setattr(refine, "complete_json", rewrite)
+    out = refine._apply_notes_chunked(scenes, notes="x", llm=None)
+    assert len(out) == 30 and all(s["shot_description"] == "REWRITTEN" for s in out)
+
+
+def test_refine_guard_rejects_collapsed_board():
+    import pytest
+    from app.pipeline import refine
+    original = [{"scene_number": i} for i in range(1, 21)]  # 20 scenes
+    with pytest.raises(ValueError):
+        refine._guard_length([{"scene_number": 1} for _ in range(5)], original)  # collapse
+    refine._guard_length([{"scene_number": i} for i in range(1, 19)], original)  # 18 ok, no raise
+
+
 def test_revision_targets_named_scene():
     board = sb_stage.generate_storyboard(
         idea="a fox", target_length=15, aspect_ratio="9:16", style_preset="anime", style_bible=None

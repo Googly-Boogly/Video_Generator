@@ -578,6 +578,28 @@ def _run(client, path):
     return final
 
 
+def test_render_is_audio_led_and_holds_frame(client):
+    # Each scene must match the length of its narration: when the voiceover outruns the
+    # clip, the scene stays on screen (the clip's last frame is held) until it finishes.
+    from app import media
+    p = _edit_ready(client)
+    pid = p["id"]
+    sid = client.get(f"/api/projects/{pid}/scenes").json()[0]["id"]
+    # Give scene 1 a long narration (mock TTS ≈ chars/15 ≈ 26s) vs its ~3s clip.
+    client.patch(f"/api/projects/{pid}/scenes/{sid}", json={"narration_text": "word " * 80})
+    _audio(client, pid)
+    _run(client, f"/api/projects/{pid}/edl")
+
+    edl = client.get(f"/api/projects/{pid}/edl").json()
+    cut0 = next(c for c in edl["cuts"] if c["scene_number"] == 1)
+    assert cut0["screen_time"] > 15  # follows the long narration, not the short clip
+
+    _run(client, f"/api/projects/{pid}/render?final=false")
+    draft = next(a for a in client.get(f"/api/projects/{pid}/renders").json() if a["kind"] == "draft")
+    dur = media.duration_of(audio_or_video_bytes=client.get(draft["url"]).content, suffix=".mp4")
+    assert dur >= cut0["screen_time"]  # scene 1 was held for the whole narration, not cut to the clip
+
+
 def test_edl_then_draft_then_final_render(client):
     p = _edit_ready(client)
     pid = p["id"]

@@ -710,7 +710,16 @@ def _edl_scene_inputs(project: Project) -> list[dict]:
 
 
 def _render_scene_inputs(db, project: Project, get_bytes) -> list[dict]:
-    """Gather clip/narration bytes + per-scene mix from the EDL, in cut order."""
+    """Gather clip/narration bytes + per-scene mix from the EDL, in cut order.
+
+    The render is **audio-led**: each narrated scene is sized to its CURRENT narration
+    duration (recomputed here, not just read from the EDL), so the scene stays on screen
+    for exactly as long as its voiceover plays — `media.assemble_video` holds (clone-pads)
+    the clip's last frame until the narration finishes. This stays correct even if the
+    EDL was built before the audio, or the audio was regenerated afterwards.
+    """
+    from .pipeline import audio as a_stage
+
     cuts = {c["scene_number"]: c for c in (project.edl or {}).get("cuts", [])}
     scenes_by_num = {s.scene_number: s for s in project.scenes}
     out = []
@@ -725,14 +734,26 @@ def _render_scene_inputs(db, project: Project, get_bytes) -> list[dict]:
         mix = cut.get("mix", {})
         narr = next((a for a in project.assets
                      if a.kind == "narration" and a.scene_id == scene.id), None)
+
+        # Audio-led screen time + captions: prefer the live narration duration over the
+        # EDL's (possibly stale) value so the scene always matches its audio.
+        screen_time = cut.get("screen_time")
+        captions = cut.get("captions")
+        narr_dur = (narr.meta or {}).get("duration") if narr else None
+        text = (scene.narration_text or "").strip()
+        if scene.audio_mode != "dialogue" and narr and narr_dur and text:
+            screen_time = float(narr_dur)
+            captions = a_stage.caption_segments(
+                text=text, duration=screen_time, alignment=(narr.meta or {}).get("alignment"))
+
         out.append({
             "clip_bytes": get_bytes(clip.storage_key),
             "narration_bytes": get_bytes(narr.storage_key) if narr else None,
             "trim_head": cut.get("trim_head", 0.0),
             "trim_tail": cut.get("trim_tail", 0.0),
-            "screen_time": cut.get("screen_time"),
+            "screen_time": screen_time,
             "caption": cut.get("caption", ""),
-            "captions": cut.get("captions"),
+            "captions": captions,
             "transition": cut.get("transition", "cut"),
             "audio_mode": scene.audio_mode,
             "narration_db": mix.get("narration_db"),

@@ -85,7 +85,7 @@ OpenAI + Anthropic (selectable LLM), ElevenLabs. Assembly: FFmpeg. Storage: MinI
 
 ```bash
 # Self-contained unit + API integration tests (SQLite + eager Celery, no infra)
-docker compose exec api python -m pytest -q          # 79 passed
+docker compose exec api python -m pytest -q          # 83 passed
 
 # Live smoke test against the running stack (95 checks across every endpoint)
 python scripts/smoke_test.py
