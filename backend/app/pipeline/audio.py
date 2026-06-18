@@ -20,13 +20,46 @@ NATIVE_DUCK_DB = -16.0      # ~15–30% under narration
 MUSIC_BED_DB = -18.0
 
 # --- Locked narration voices (mock catalog; real list comes from ElevenLabs) -
-DEFAULT_VOICE_ID = "voice_aria"
+# Sarah (mature, reassuring, confident) is the default narrator.
+DEFAULT_VOICE_ID = "voice_sarah"
 MOCK_VOICES = [
+    {"voice_id": "voice_sarah", "name": "Sarah",
+     "labels": {"gender": "female", "tone": "mature, reassuring, confident"}},
     {"voice_id": "voice_aria", "name": "Aria", "labels": {"gender": "female", "tone": "warm"}},
-    {"voice_id": "voice_atlas", "name": "Atlas", "labels": {"gender": "male", "tone": "cinematic"}},
-    {"voice_id": "voice_sage", "name": "Sage", "labels": {"gender": "neutral", "tone": "calm"}},
-    {"voice_id": "voice_nova", "name": "Nova", "labels": {"gender": "female", "tone": "bright"}},
+    {"voice_id": "voice_george", "name": "George", "labels": {"gender": "male", "tone": "cinematic"}},
+    {"voice_id": "voice_lily", "name": "Lily", "labels": {"gender": "female", "tone": "bright"}},
 ]
+
+# Real ElevenLabs public voice ids backing the mock-catalog placeholders. A live
+# project that stored a mock voice id (or fell back to DEFAULT_VOICE_ID without a
+# voice ever being assigned) would otherwise 404 — "voice_sarah" is not a real
+# ElevenLabs voice. Live users normally pick a real voice from list_voices();
+# this is the fallback so the built-in catalog names always narrate. The legacy
+# "voice_atlas"/"voice_sage"/"voice_nova" keys are kept as aliases so older
+# projects that stored them still resolve.
+_LIVE_VOICE_IDS = {
+    "voice_sarah": "EXAVITQu4vr4xnSDxMaL",  # Sarah  (mature, reassuring, confident)
+    "voice_aria": "9BWtsMINqrJLrRacOk9x",   # Aria   (warm female)
+    "voice_george": "JBFqnCBsd6RMkjVDRZzb",  # George (cinematic male)
+    "voice_lily": "pFZP5JQG7iQjIQuC4Bku",   # Lily   (bright female)
+    # legacy placeholder aliases
+    "voice_atlas": "JBFqnCBsd6RMkjVDRZzb",  # -> George
+    "voice_sage": "EXAVITQu4vr4xnSDxMaL",   # -> Sarah
+    "voice_nova": "pFZP5JQG7iQjIQuC4Bku",   # -> Lily
+}
+DEFAULT_LIVE_VOICE_ID = _LIVE_VOICE_IDS["voice_sarah"]
+
+
+def resolve_live_voice_id(voice_id: str | None) -> str:
+    """Map a stored voice id to a real ElevenLabs id for live narration.
+
+    Mock-catalog placeholders translate to their real backing voice; a real id
+    (one the user picked from list_voices) passes through unchanged; empty falls
+    back to the default real voice.
+    """
+    if not voice_id:
+        return DEFAULT_LIVE_VOICE_ID
+    return _LIVE_VOICE_IDS.get(voice_id, voice_id)
 
 # --- Built-in music library (synthesized on demand; real librosa analysis) ----
 MUSIC_LIBRARY = [
@@ -59,7 +92,9 @@ def synth_narration(
 
     from ..providers import elevenlabs_provider
 
-    data, alignment = elevenlabs_provider.synth_with_timestamps(text=text, voice_id=voice_id)
+    data, alignment = elevenlabs_provider.synth_with_timestamps(
+        text=text, voice_id=resolve_live_voice_id(voice_id)
+    )
     return data, "audio/mpeg", media.duration_of(audio_or_video_bytes=data, suffix=".mp3"), alignment
 
 

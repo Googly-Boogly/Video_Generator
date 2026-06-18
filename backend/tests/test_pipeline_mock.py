@@ -338,6 +338,26 @@ def test_narration_synth_is_silent_wav_in_mock():
     assert alignment is None  # no timestamps in mock mode
 
 
+def test_resolve_live_voice_id_maps_mock_placeholders_to_real_ids():
+    from app.pipeline import audio as a
+    # Mock catalog ids ("voice_aria") are NOT real ElevenLabs voices — live narration
+    # 404s unless they're translated. Each placeholder resolves to a real id, the
+    # default voice resolves, an already-real id passes through, and empty falls back.
+    assert a.resolve_live_voice_id("voice_aria") == a._LIVE_VOICE_IDS["voice_aria"]
+    assert a.resolve_live_voice_id(a.DEFAULT_VOICE_ID) == a.DEFAULT_LIVE_VOICE_ID
+    # Default narrator is Sarah (mature, reassuring, confident).
+    assert a.DEFAULT_VOICE_ID == "voice_sarah"
+    assert a.DEFAULT_LIVE_VOICE_ID == "EXAVITQu4vr4xnSDxMaL"
+    assert not a.DEFAULT_LIVE_VOICE_ID.startswith("voice_")
+    # Legacy placeholder ids still resolve to real voices (no 404 for old projects).
+    assert a.resolve_live_voice_id("voice_sage") == "EXAVITQu4vr4xnSDxMaL"
+    assert all(not v.startswith("voice_") for v in a._LIVE_VOICE_IDS.values())
+    real = "9BWtsMINqrJLrRacOk9x"
+    assert a.resolve_live_voice_id(real) == real  # real id passes through
+    assert a.resolve_live_voice_id(None) == a.DEFAULT_LIVE_VOICE_ID
+    assert a.resolve_live_voice_id("") == a.DEFAULT_LIVE_VOICE_ID
+
+
 def test_beat_grid_detects_tempo_with_librosa():
     from app.pipeline import audio as a
     from app import media

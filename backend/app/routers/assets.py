@@ -25,14 +25,18 @@ def _to_out(a: Asset) -> AssetOut:
 
 @router.get("/{asset_id}/content")
 def asset_content(asset_id: str, download: bool = False, db: Session = Depends(get_db)):
-    from ..storage import get_bytes
+    from ..storage import ObjectNotFound, get_bytes
 
     asset = db.get(Asset, asset_id)
     if not asset:
         raise HTTPException(404, "asset not found")
     try:
         data = get_bytes(asset.storage_key)
-    except Exception as exc:  # noqa: BLE001
+    except ObjectNotFound as exc:
+        # The row exists but its blob is gone (e.g. cleaned up by a prior re-run).
+        # 410 tells the client this asset must be regenerated, not retried.
+        raise HTTPException(410, "asset content is gone — regenerate this asset") from exc
+    except Exception as exc:  # noqa: BLE001 — genuine storage outage
         raise HTTPException(502, f"storage error: {exc}")
     headers = {"Cache-Control": "public, max-age=86400"}
     if download:

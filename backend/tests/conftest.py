@@ -31,8 +31,17 @@ celery_app.conf.update(task_always_eager=True, task_eager_propagates=True)
 # storage helpers are imported lazily at call time, so patching the module
 # attributes here is picked up everywhere.
 _MEM: dict[str, bytes] = {}
+
+
+def _mem_get(key):
+    try:
+        return _MEM[key]
+    except KeyError as exc:  # mirror real storage: missing blob -> ObjectNotFound
+        raise storage_mod.ObjectNotFound(key) from exc
+
+
 storage_mod.put_bytes = lambda key, data, content_type="application/octet-stream": (_MEM.__setitem__(key, data) or key)
-storage_mod.get_bytes = lambda key: _MEM[key]
+storage_mod.get_bytes = _mem_get
 storage_mod.public_url = lambda key, expires=3600: f"memory://{key}"
 storage_mod.delete_object = lambda key: _MEM.pop(key, None)
 storage_mod.ensure_bucket = lambda: None

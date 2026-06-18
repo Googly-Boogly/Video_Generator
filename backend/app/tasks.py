@@ -719,6 +719,7 @@ def _render_scene_inputs(db, project: Project, get_bytes) -> list[dict]:
     EDL was built before the audio, or the audio was regenerated afterwards.
     """
     from .pipeline import audio as a_stage
+    from .storage import ObjectNotFound
 
     cuts = {c["scene_number"]: c for c in (project.edl or {}).get("cuts", [])}
     scenes_by_num = {s.scene_number: s for s in project.scenes}
@@ -730,10 +731,29 @@ def _render_scene_inputs(db, project: Project, get_bytes) -> list[dict]:
         clip = db.get(Asset, scene.clip_asset_id)
         if not clip:
             continue
+        # A missing clip blob must not abort the whole render — skip just this scene
+        # so the rest of the film still assembles. (Row can outlive its blob after a
+        # prior re-run cleaned the object; regenerate the scene to restore it.)
+        try:
+            clip_bytes = get_bytes(clip.storage_key)
+        except ObjectNotFound:
+            log.warning("render: skipping scene %s — clip blob missing (%s)",
+                        scene.scene_number, clip.storage_key)
+            continue
         cut = cuts[num]
         mix = cut.get("mix", {})
         narr = next((a for a in project.assets
                      if a.kind == "narration" and a.scene_id == scene.id), None)
+        # A missing narration blob shouldn't kill the render either — drop the
+        # narration for this scene and render it silent.
+        narration_bytes = None
+        if narr:
+            try:
+                narration_bytes = get_bytes(narr.storage_key)
+            except ObjectNotFound:
+                log.warning("render: scene %s narration blob missing (%s) — rendering silent",
+                            scene.scene_number, narr.storage_key)
+                narr = None
 
         # Audio-led screen time + captions: prefer the live narration duration over the
         # EDL's (possibly stale) value so the scene always matches its audio.
@@ -747,8 +767,8 @@ def _render_scene_inputs(db, project: Project, get_bytes) -> list[dict]:
                 text=text, duration=screen_time, alignment=(narr.meta or {}).get("alignment"))
 
         out.append({
-            "clip_bytes": get_bytes(clip.storage_key),
-            "narration_bytes": get_bytes(narr.storage_key) if narr else None,
+            "clip_bytes": clip_bytes,
+            "narration_bytes": narration_bytes,
             "trim_head": cut.get("trim_head", 0.0),
             "trim_tail": cut.get("trim_tail", 0.0),
             "screen_time": screen_time,

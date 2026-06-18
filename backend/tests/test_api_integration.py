@@ -371,8 +371,8 @@ def test_set_voice(client):
     p = _make_project(client)
     pid = p["id"]
     assert client.post(f"/api/projects/{pid}/voice", json={"voice_id": "bogus"}).status_code == 400
-    r = client.post(f"/api/projects/{pid}/voice", json={"voice_id": "voice_atlas"})
-    assert r.json()["voice_id"] == "voice_atlas"
+    r = client.post(f"/api/projects/{pid}/voice", json={"voice_id": "voice_george"})
+    assert r.json()["voice_id"] == "voice_george"
 
 
 def test_music_library_pick_runs_librosa_beat_grid(client):
@@ -470,6 +470,21 @@ def test_regenerate_cleans_old_blobs(client, storage_mem):
     after = {k for k in storage_mem if prefix in k}
     assert len(after) == len(before)  # no accumulation
     assert before.isdisjoint(after)   # old blobs deleted, new ones written
+
+
+def test_asset_content_returns_410_when_blob_missing(client, storage_mem):
+    # The row can outlive its blob (a prior re-run cleaned the object). The content
+    # proxy must return a clean 410 ("regenerate"), not a generic 502, so the UI can
+    # distinguish a lost asset from a storage outage.
+    p = _make_project(client, target_length=15)
+    _storyboard(client, p["id"])
+    pid = p["id"]
+    _keyframes(client, pid)
+    key = next(k for k in storage_mem if f"projects/{pid}/keyframe/" in k)
+    asset_id = key.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+    assert client.get(f"/api/assets/{asset_id}/content").status_code == 200
+    storage_mem.pop(key)  # blob gone, row remains
+    assert client.get(f"/api/assets/{asset_id}/content").status_code == 410
 
 
 def test_all_dialogue_audio_advances_status(client):
@@ -598,6 +613,26 @@ def test_render_is_audio_led_and_holds_frame(client):
     draft = next(a for a in client.get(f"/api/projects/{pid}/renders").json() if a["kind"] == "draft")
     dur = media.duration_of(audio_or_video_bytes=client.get(draft["url"]).content, suffix=".mp4")
     assert dur >= cut0["screen_time"]  # scene 1 was held for the whole narration, not cut to the clip
+
+
+def test_render_skips_scene_with_missing_clip_blob(client, storage_mem):
+    # A single missing clip blob must not abort the whole render — the affected scene
+    # is skipped and the rest of the film still assembles (regression for a render that
+    # died on the first NoSuchKey across all scenes).
+    from app import media
+    p = _edit_ready(client)
+    pid = p["id"]
+    _audio(client, pid)
+    _run(client, f"/api/projects/{pid}/edl")
+    clip_keys = [k for k in storage_mem if f"projects/{pid}/clip/" in k]
+    assert len(clip_keys) >= 2  # need >1 scene so skipping one still leaves content
+    storage_mem.pop(clip_keys[0])  # blob gone; the asset row + EDL cut remain
+
+    dr = _run(client, f"/api/projects/{pid}/render?final=false")  # must NOT raise/fail
+    assert dr["result"]["kind"] == "draft"
+    draft = next(a for a in client.get(f"/api/projects/{pid}/renders").json() if a["kind"] == "draft")
+    dur = media.duration_of(audio_or_video_bytes=client.get(draft["url"]).content, suffix=".mp4")
+    assert dur > 0  # produced a real video from the surviving scenes
 
 
 def test_edl_then_draft_then_final_render(client):

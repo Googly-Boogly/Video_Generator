@@ -7,6 +7,8 @@ character/style consistency.
 """
 from __future__ import annotations
 
+import time
+
 import httpx
 
 from ..config import settings
@@ -18,6 +20,34 @@ _IMAGE_SIZE = {
     "9:16": "portrait_16_9",
     "1:1": "square_hd",
 }
+
+# fal_client.subscribe() polls the status endpoint ~6x/sec, which floods our logs
+# and risks rate-limiting on long multi-scene runs. We submit + poll manually at a
+# sane interval instead. Video clips can take a couple of minutes, so the timeout
+# is generous.
+_POLL_INTERVAL_SECONDS = 4.0
+_POLL_TIMEOUT_SECONDS = 900.0
+
+
+def _run(fal_id: str, arguments: dict) -> dict:
+    """Submit a job to fal and poll until completion at `_POLL_INTERVAL_SECONDS`.
+
+    Drop-in replacement for `fal_client.subscribe()` minus the aggressive
+    built-in polling. Returns the completed result dict.
+    """
+    import fal_client
+    from fal_client.client import Completed
+
+    handle = fal_client.submit(fal_id, arguments=arguments)
+    deadline = time.monotonic() + _POLL_TIMEOUT_SECONDS
+    while not isinstance(handle.status(with_logs=False), Completed):
+        if time.monotonic() > deadline:
+            raise RuntimeError(
+                f"fal request {handle.request_id} for {fal_id} timed out "
+                f"after {_POLL_TIMEOUT_SECONDS:.0f}s"
+            )
+        time.sleep(_POLL_INTERVAL_SECONDS)
+    return handle.get()
 
 
 def _fetch(url: str) -> bytes:
@@ -39,8 +69,6 @@ def generate_image(
     if not settings.fal_key:
         raise RuntimeError("FAL_KEY not set (and mock mode is off).")
 
-    import fal_client
-
     model = route(model_id)
     refs = (reference_urls or [])[: model.max_reference_images]
 
@@ -56,7 +84,7 @@ def generate_image(
         # provider tweak is a one-line change.
         arguments["image_urls"] = refs
 
-    result = fal_client.subscribe(model.fal_id, arguments=arguments, with_logs=False)
+    result = _run(model.fal_id, arguments)
     images = result.get("images") or []
     if not images:
         raise RuntimeError(f"{model.label} returned no images")
@@ -114,7 +142,7 @@ def generate_video(
     if refs:
         arguments["reference_image_urls"] = refs
 
-    result = fal_client.subscribe(model.fal_id, arguments=arguments, with_logs=False)
+    result = _run(model.fal_id, arguments)
     video = result.get("video") or {}
     url = video.get("url") if isinstance(video, dict) else None
     if not url:

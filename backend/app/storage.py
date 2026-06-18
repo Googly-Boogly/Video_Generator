@@ -6,8 +6,14 @@ from functools import lru_cache
 
 import boto3
 from botocore.client import Config
+from botocore.exceptions import ClientError
 
 from .config import settings
+
+
+class ObjectNotFound(KeyError):
+    """The storage key has no backing object (the blob is gone, not a transient
+    outage). Lets callers return a clean 410 instead of a generic 502."""
 
 
 @lru_cache
@@ -43,7 +49,13 @@ def put_bytes(key: str, data: bytes, content_type: str = "application/octet-stre
 
 def get_bytes(key: str) -> bytes:
     client = _client()
-    obj = client.get_object(Bucket=settings.minio_bucket, Key=key)
+    try:
+        obj = client.get_object(Bucket=settings.minio_bucket, Key=key)
+    except ClientError as exc:
+        code = exc.response.get("Error", {}).get("Code")
+        if code in ("NoSuchKey", "NoSuchBucket", "404"):
+            raise ObjectNotFound(key) from exc
+        raise
     return obj["Body"].read()
 
 
